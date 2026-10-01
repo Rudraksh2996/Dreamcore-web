@@ -7,7 +7,7 @@ import * as THREE from 'three';
 /* ============================================================
    1. PROCEDURAL TILE TEXTURE GENERATOR
    ============================================================ */
-function useTileMaterial(color, groutColor = '#ffffff') {
+function useTileMaterial(color, groutColor = '#e2eeef') {
   const tex = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
@@ -17,7 +17,8 @@ function useTileMaterial(color, groutColor = '#ffffff') {
     ctx.fillStyle = groutColor;
     ctx.fillRect(0, 0, 512, 512);
     
-    const padding = 512 * 0.04;
+    // Thinner grout lines
+    const padding = 512 * 0.015;
     ctx.fillStyle = color;
     ctx.fillRect(padding, padding, 512 - padding * 2, 512 - padding * 2);
     
@@ -39,9 +40,9 @@ function useTileMaterial(color, groutColor = '#ffffff') {
 
   return {
     map: tex,
-    roughness: 0.05,
-    metalness: 0.1,
-    clearcoat: 1.0,
+    roughness: 0.22,
+    metalness: 0.0,
+    clearcoat: 0.35,
     clearcoatRoughness: 0.02,
   };
 }
@@ -82,9 +83,8 @@ const FPSController = () => {
   }, [camera]);
 
   useFrame((_, delta) => {
-    // Cap delta to avoid physics explosions on lag spikes
     const dt = Math.min(delta, 0.1); 
-    const speed = 12.0;
+    const speed = 6.0;
     const damping = 8.0;
 
     velocity.current.x -= velocity.current.x * damping * dt;
@@ -105,11 +105,10 @@ const FPSController = () => {
     const worldVelocity = velocity.current.clone().applyEuler(camEuler);
     position.current.add(worldVelocity);
 
-    // Procedural Collision Constraints
     const z = position.current.z;
     const pathCenter = Math.sin(z * 0.1) * 2.0 + 4.75;
-    const minX = pathCenter - 1.8; // Edge of the water channel
-    const maxX = pathCenter + 1.8; // Edge of the right wall
+    const minX = pathCenter - 1.8; 
+    const maxX = pathCenter + 1.8; 
     
     if (position.current.x < minX) {
       position.current.x = minX;
@@ -153,35 +152,47 @@ const WavyCorridor = () => {
   const length = 140;
   const numPortholes = 12;
 
-  const { leftWall, rightWall, floor, ceiling, water, waterBase } = useMemo(() => {
-    // --- Left Wall (Extrude Geometry with Native Holes) ---
-    const shape = new THREE.Shape();
-    for(let x = 0; x <= length; x += 1) { if(x === 0) shape.moveTo(0,0); else shape.lineTo(x,0); }
-    for(let y = 1; y <= 8; y += 1) shape.lineTo(length, y);
-    for(let x = length - 1; x >= 0; x -= 1) shape.lineTo(x, 8);
-    for(let y = 7; y > 0; y -= 1) shape.lineTo(0, y);
-
+  const { leftWallGeoms, trim, rightWall, floor, ceiling, water, waterBase } = useMemo(() => {
+    // --- Left Wall (Segmented to prevent long triangles crossing the curve) ---
+    const segmentedLeftWalls = [];
+    const segLength = length / numPortholes;
+    
     for (let i = 0; i < numPortholes; i++) {
+      const startX = i * segLength;
+      const endX = (i + 1) * segLength;
+      
+      const shape = new THREE.Shape();
+      shape.moveTo(startX, 0);
+      for(let x = startX + 0.5; x <= endX; x += 0.5) shape.lineTo(x, 0);
+      for(let y = 1; y <= 8; y += 1) shape.lineTo(endX, y);
+      for(let x = endX - 0.5; x >= startX; x -= 0.5) shape.lineTo(x, 8);
+      for(let y = 7; y > 0; y -= 1) shape.lineTo(startX, y);
+
       const hole = new THREE.Path();
-      const xCenter = (i + 0.5) * (length / numPortholes);
+      const xCenter = startX + segLength / 2;
       hole.absarc(xCenter, 4, 2.6, 0, Math.PI * 2, false);
       shape.holes.push(hole);
+
+      const geom = new THREE.ExtrudeGeometry(shape, { depth: 1.5, bevelEnabled: false, curveSegments: 32 });
+      
+      const lPos = geom.attributes.position;
+      for(let j = 0; j < lPos.count; j++) {
+         const x = lPos.getX(j); 
+         const y = lPos.getY(j); 
+         const z = lPos.getZ(j); 
+         const z_world = -x;
+         const x_world = Math.sin(z_world * 0.1) * 2.0 + 2 + (z - 1.5);
+         lPos.setXYZ(j, x_world, y, z_world);
+      }
+      applyWorldUVs(geom);
+      segmentedLeftWalls.push(geom);
     }
-    const leftGeom = new THREE.ExtrudeGeometry(shape, { depth: 1.5, bevelEnabled: false, curveSegments: 32 });
-    
-    // Distort Left Wall Vertices (Bend around Sine Wave)
-    const lPos = leftGeom.attributes.position;
-    for(let i = 0; i < lPos.count; i++) {
-       const x = lPos.getX(i); // length (0 to 140)
-       const y = lPos.getY(i); // height (0 to 8)
-       const z = lPos.getZ(i); // thickness (0 to 1.5)
-       const z_world = -x;
-       const x_world = Math.sin(z_world * 0.1) * 2.0 + 2 + (z - 1.5);
-       lPos.setXYZ(i, x_world, y, z_world);
-    }
-    leftGeom.computeVertexNormals();
 
     // --- Procedural Solid Structures (Highly Subdivided Boxes) ---
+    const trimGeom = new THREE.BoxGeometry(0.4, 0.5, length, 2, 1, length);
+    trimGeom.translate(0.2, 0.25, -length / 2);
+    applyWorldUVs(trimGeom);
+
     const rightGeom = new THREE.BoxGeometry(1.5, 8, length, 1, 1, length);
     rightGeom.translate(7.75, 4, -length / 2);
     applyWorldUVs(rightGeom);
@@ -202,8 +213,7 @@ const WavyCorridor = () => {
     waterBaseGeom.translate(1.25, -0.9, -length / 2);
     applyWorldUVs(waterBaseGeom);
 
-    // Apply exact same sine wave vertex distortion to all structures perfectly
-    const geometries = [rightGeom, floorGeom, ceilGeom, waterGeom, waterBaseGeom];
+    const geometries = [trimGeom, rightGeom, floorGeom, ceilGeom, waterGeom, waterBaseGeom];
     geometries.forEach(geom => {
       const pos = geom.attributes.position;
       for(let i = 0; i < pos.count; i++) {
@@ -212,11 +222,11 @@ const WavyCorridor = () => {
       geom.computeVertexNormals();
     });
 
-    return { leftWall: leftGeom, rightWall: rightGeom, floor: floorGeom, ceiling: ceilGeom, water: waterGeom, waterBase: waterBaseGeom };
+    return { leftWallGeoms: segmentedLeftWalls, trim: trimGeom, rightWall: rightGeom, floor: floorGeom, ceiling: ceilGeom, water: waterGeom, waterBase: waterBaseGeom };
   }, [length, numPortholes]);
 
-  const pinkTiles = useTileMaterial('#f99cba', '#ffffff');
-  const cyanTiles = useTileMaterial('#5ab8d2', '#ffffff');
+  const pinkTiles = useTileMaterial('#f99cba', '#e2eeef');
+  const cyanTiles = useTileMaterial('#5ab8d2', '#e2eeef');
   const ceilingMaterial = new THREE.MeshStandardMaterial({ color: '#fff9e6', roughness: 0.4 });
 
   return (
@@ -241,8 +251,14 @@ const WavyCorridor = () => {
         <meshPhysicalMaterial {...cyanTiles} />
       </mesh>
 
-      <mesh geometry={leftWall} castShadow receiveShadow>
-        <meshPhysicalMaterial {...cyanTiles} />
+      {leftWallGeoms.map((geom, idx) => (
+        <mesh key={`wall-${idx}`} geometry={geom} castShadow receiveShadow>
+          <meshPhysicalMaterial {...cyanTiles} />
+        </mesh>
+      ))}
+
+      <mesh geometry={trim} receiveShadow>
+        <meshStandardMaterial color="#fff3d1" roughness={0.4} />
       </mesh>
 
       <mesh geometry={ceiling} receiveShadow>
@@ -282,11 +298,18 @@ const WavyCorridor = () => {
    ============================================================ */
 const OutsideScenery = () => {
   return (
-    <group position={[-25, -2, -60]}>
-      <Sky sunPosition={[-30, 2, 20]} turbidity={0.7} rayleigh={1.5} mieCoefficient={0.005} />
-      <Clouds material={THREE.MeshBasicMaterial}>
-        <Cloud seed={1} segments={80} bounds={[50, 20, 120]} volume={40} color="#ffdac2" position={[0, 0, 0]} />
-        <Cloud seed={2} segments={50} bounds={[40, 25, 100]} volume={30} color="#b3cfff" position={[-5, -10, 20]} />
+    <group position={[-60, -15, -40]}>
+      {/* Vibrant Sky Gradient: bright azure top, glowing warm horizon */}
+      <Sky sunPosition={[-100, 2, 20]} turbidity={0.1} rayleigh={0.1} mieCoefficient={0.001} mieDirectionalG={0.9} />
+      
+      {/* Sunset Highlights: warm gold directional light on the clouds */}
+      <directionalLight position={[-80, 20, 10]} intensity={5.0} color="#ffdd99" castShadow />
+      
+      {/* Sea of Clouds: Strictly bounded outside the window to prevent interior clipping */}
+      <Clouds material={THREE.MeshLambertMaterial} limit={400}>
+        <Cloud seed={1} segments={100} bounds={[80, 15, 160]} volume={80} color="#4a88b5" position={[0, -5, 0]} opacity={0.9} />
+        <Cloud seed={2} segments={80} bounds={[70, 10, 150]} volume={60} color="#8bb8d6" position={[-10, 2, 10]} opacity={0.8} />
+        <Cloud seed={3} segments={80} bounds={[60, 8, 140]} volume={50} color="#ffffff" position={[-5, 8, -10]} opacity={0.9} />
       </Clouds>
     </group>
   );
@@ -307,8 +330,9 @@ export default function App() {
       )}
 
       <Canvas shadows camera={{ fov: 65 }}>
+        <color attach="background" args={['#87CEEB']} />
         <Suspense fallback={null}>
-          <ambientLight intensity={0.8} color="#ffffff" />
+          <ambientLight intensity={0.6} color="#c9e2ff" />
           <Environment preset="city" background={false} blur={0.1} />
 
           <WavyCorridor />
@@ -322,7 +346,7 @@ export default function App() {
           )}
 
           <EffectComposer disableNormalPass>
-            <Bloom luminanceThreshold={0.75} mipmapBlur intensity={1.8} />
+            <Bloom luminanceThreshold={0.75} mipmapBlur intensity={0.2} />
             <Vignette eskil={false} offset={0.1} darkness={0.5} />
           </EffectComposer>
         </Suspense>
