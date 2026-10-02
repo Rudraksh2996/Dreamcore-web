@@ -3,6 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { MeshPortalMaterial } from '@react-three/drei';
 import { DoorCasing, SixPanelDoorMesh } from './SharedDoors';
+import { getDoorFrame } from './DoorHelper';
 import { MeadowScene } from './MeadowScene';
 import { useGlobalState } from '../App';
 
@@ -14,24 +15,18 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
   const canOpenRef = useRef(false);
   const { setGatePrompt, setActiveScene, setPlayerMeadowLocalZ } = useGlobalState();
 
-  const gateMatrixInverse = React.useMemo(() => {
-    const mat = new THREE.Matrix4().makeRotationY(gateConfig.rotY);
-    mat.setPosition(gateConfig.x, 0, gateConfig.z);
-    return mat.invert();
-  }, [gateConfig]);
+  const { doorPos, forward, signedDistance } = React.useMemo(() => getDoorFrame(gateConfig), [gateConfig]);
 
   useFrame(() => {
      // Camera distance logic
-     const pos = new THREE.Vector3(gateConfig.x, 1.0, gateConfig.z);
-     const dist = camera.position.distanceTo(pos);
+     const dist = camera.position.distanceTo(doorPos);
      
-     // Transform player to meadow-local space using inverse matrix
-     const localPos = camera.position.clone().applyMatrix4(gateMatrixInverse);
-     setPlayerMeadowLocalZ(localPos.z);
+     const sDist = signedDistance(camera.position);
+     setPlayerMeadowLocalZ(sDist);
      
      const lookDir = new THREE.Vector3();
      camera.getWorldDirection(lookDir);
-     const toGate = pos.clone().sub(camera.position).normalize();
+     const toGate = doorPos.clone().sub(camera.position).normalize();
      const isLooking = lookDir.dot(toGate) > 0.7;
      
      canOpenRef.current = dist < 3.5 && isLooking && !isOpen;
@@ -43,13 +38,14 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
      
      // Seamless crossing logic
      if (isOpen) {
-        if (localPos.z < 0.1 && dist < 3.0) {
+        if (sDist > -0.1 && dist < 3.0) {
            if (portalRef.current) {
-              portalRef.current.blend = THREE.MathUtils.clamp(1.0 - (localPos.z * 2.0), 0, 1);
+              // Blend to 1.0 right before crossing completely
+              portalRef.current.blend = THREE.MathUtils.clamp(sDist * 2.0, 0, 1);
            }
         }
-        // Actually swap scenes when fully crossed
-        if (localPos.z < -0.1 && dist < 3.0) {
+        // Actually swap scenes when fully crossed (e.g. sDist > 0.1)
+        if (sDist > 0.1 && dist < 3.0) {
            setActiveScene('meadow');
         }
      }

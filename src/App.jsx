@@ -10,6 +10,8 @@ import { SixPanelDoorMesh, DoorCasing } from './meadow/SharedDoors';
 const GlobalStateContext = createContext();
 export const useGlobalState = () => useContext(GlobalStateContext);
 
+import { getDoorFrame } from './meadow/DoorHelper';
+
 const gateConfig = {
   z: -140,
   x: Math.sin(-140 * 0.1) * 2.0 + 4.75,
@@ -17,7 +19,20 @@ const gateConfig = {
 };
 const gateMatrix = new THREE.Matrix4().makeRotationY(gateConfig.rotY);
 gateMatrix.setPosition(gateConfig.x, 0, gateConfig.z);
-const gateMatrixInverse = gateMatrix.clone().invert();
+
+const { doorPos, forward, right, signedDistance, signedLateral } = getDoorFrame(gateConfig);
+
+// Dev assertions
+if (import.meta.env.DEV) {
+   const spawnDist = signedDistance(new THREE.Vector3(4.75, 1.6, -2));
+   if (spawnDist > -50) throw new Error("Assertion failed: Spawn is not sufficiently far on corridor side: " + spawnDist);
+   
+   const beforeDoor = doorPos.clone().add(forward.clone().multiplyScalar(-1.0));
+   if (signedDistance(beforeDoor) > 0) throw new Error("Assertion failed: Point before door is positive");
+   
+   const insideDoor = doorPos.clone().add(forward.clone().multiplyScalar(1.0));
+   if (signedDistance(insideDoor) < 0) throw new Error("Assertion failed: Point inside door is negative");
+}
 
 /* ============================================================
    1. PROCEDURAL TILE TEXTURE GENERATOR
@@ -120,10 +135,12 @@ const FPSController = ({ teleportTarget }) => {
     const worldVelocity = velocity.current.clone().applyEuler(camEuler);
     const nextPos = position.current.clone().add(worldVelocity);
 
-    const localPos = nextPos.clone().applyMatrix4(gateMatrixInverse);
-    setPlayerMeadowLocalZ(localPos.z);
+    const sDist = signedDistance(nextPos);
+    setPlayerMeadowLocalZ(sDist);
 
+    let boundsString = 'None';
     if (activeScene === 'corridor') {
+      boundsString = 'Corridor';
       const z = nextPos.z;
       const pathCenter = Math.sin(z * 0.1) * 2.0 + 4.75;
       const minX = pathCenter - 1.8; const maxX = pathCenter + 1.8; 
@@ -131,26 +148,46 @@ const FPSController = ({ teleportTarget }) => {
       if (nextPos.x > maxX) { nextPos.x = maxX; velocity.current.x = 0; }
       if (nextPos.z > -1) { nextPos.z = -1; velocity.current.z = 0; }
       
-      // Portal Door bounds (blocks Z < 0 if not walking through open door)
-      if (localPos.z < 0.2) {
-         if (localPos.x < -0.475 || localPos.x > 0.475) {
-            localPos.z = 0.2; velocity.current.z = 0;
-            nextPos.copy(localPos.applyMatrix4(gateMatrix));
+      // Portal Door bounds: block walking past the door plane UNLESS within the opening
+      if (sDist > -0.2) {
+         boundsString = 'Corridor + Door Block';
+         const lat = signedLateral(nextPos);
+         if (lat < -0.475 || lat > 0.475 || sDist > 0.0) {
+            // Push back to corridor side
+            const pushBack = doorPos.clone().add(forward.clone().multiplyScalar(-0.2));
+            const pushLat = doorPos.clone().add(right.clone().multiplyScalar(lat));
+            nextPos.x = pushLat.x + forward.x * -0.2;
+            nextPos.z = pushLat.z + forward.z * -0.2;
+            velocity.current.x = 0; velocity.current.z = 0;
          }
       }
     } else {
+      boundsString = 'Meadow';
       // MEADOW BOUNDS
-      // 5m width (x: -2.5 to 2.5), 12m length (z: -12 to 0)
-      if (localPos.x < -2.3) { localPos.x = -2.3; velocity.current.x = 0; }
-      if (localPos.x > 2.3) { localPos.x = 2.3; velocity.current.x = 0; }
-      if (localPos.z < -11.8) { localPos.z = -11.8; velocity.current.z = 0; }
-      
-      // Door closes behind player at Z < -2.0.
-      if (localPos.z > -0.2) {
-         localPos.z = -0.2; velocity.current.z = 0;
+      // 5m width (-2.5 to 2.5), 12m length (sDist 0 to 12)
+      const lat = signedLateral(nextPos);
+      if (lat < -2.3) { 
+         const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(-2.3));
+         nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
+      }
+      if (lat > 2.3) { 
+         const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(2.3));
+         nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
+      }
+      if (sDist > 11.8) { 
+         const p = doorPos.clone().add(forward.clone().multiplyScalar(11.8)).add(right.clone().multiplyScalar(lat));
+         nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
       }
       
-      nextPos.copy(localPos.applyMatrix4(gateMatrix));
+      // Door closes behind player at sDist > 2.0. Prevent walking back into it.
+      if (sDist < 0.2) {
+         const p = doorPos.clone().add(forward.clone().multiplyScalar(0.2)).add(right.clone().multiplyScalar(lat));
+         nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
+      }
+    }
+
+    if (window.setDebugInfo) {
+       window.setDebugInfo({ x: nextPos.x, z: nextPos.z, sDist, bounds: boundsString });
     }
 
     position.current.copy(nextPos);
@@ -271,13 +308,13 @@ const OutsideScenery = () => {
    ============================================================ */
 const MeadowEntryDoorNative = () => {
    const doorGroup = useRef();
-   const { playerMeadowLocalZ } = useGlobalState();
+   const { playerMeadowLocalZ } = useGlobalState(); // This is now sDist
    
    // We spawn into meadow natively. The door is wide open (-100 deg).
-   // Once player Z < -2.0, swing it shut slowly (to 0 deg).
+   // Once player sDist > 2.0, swing it shut slowly (to 0 deg).
    useFrame(() => {
       if (!doorGroup.current) return;
-      if (playerMeadowLocalZ < -2.0) {
+      if (playerMeadowLocalZ > 2.0) {
          doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, 0, 1.5, 0.016);
       } else {
          doorGroup.current.rotation.y = -Math.PI * (100 / 180);
@@ -330,8 +367,32 @@ export default function App() {
      playerMeadowLocalZ, setPlayerMeadowLocalZ
   };
 
+  const [debugInfo, setDebugInfo] = useState({});
+  const [showWireframes, setShowWireframes] = useState(false);
+  
+  useEffect(() => {
+     if (import.meta.env.DEV) {
+        const onKey = (e) => { if (e.code === 'KeyK') setShowWireframes(s => !s); };
+        window.addEventListener('keydown', onKey);
+        
+        // Expose a global setter for the FPSController to push debug data without re-rendering everything rapidly if possible, but React state is fine for this demo
+        window.setDebugInfo = setDebugInfo;
+        
+        return () => window.removeEventListener('keydown', onKey);
+     }
+  }, []);
+
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000', overflow: 'hidden' }}>
+      {import.meta.env.DEV && (
+         <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 100, color: 'lime', fontFamily: 'monospace', fontSize: 12, pointerEvents: 'none', background: 'rgba(0,0,0,0.5)', padding: 10 }}>
+            <div>Active Scene: {activeScene}</div>
+            <div>Signed Dist: {debugInfo.sDist?.toFixed(2)}</div>
+            <div>Pos X: {debugInfo.x?.toFixed(2)} Z: {debugInfo.z?.toFixed(2)}</div>
+            <div>Active Bounds: {debugInfo.bounds}</div>
+            <div>Wireframes (K): {showWireframes ? 'ON' : 'OFF'}</div>
+         </div>
+      )}
       {!entered && (
         <div onClick={() => setEntered(true)} style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, #5ab8d2 0%, #f99cba 100%)', cursor: 'pointer', color: '#fff', letterSpacing: '0.4em', fontSize: '15px' }}>
           CLICK TO ENTER THE DREAM
