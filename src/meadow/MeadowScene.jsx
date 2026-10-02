@@ -84,7 +84,7 @@ export const MeadowScene = () => {
   // For simplicity, we just use the texture on Standard material and let lights do the work.
 
   return (
-    <group position={[500, 0, 0]}>
+    <group>
        {/* Lighting */}
        <hemisphereLight skyColor="#2b87b5" groundColor="#f2a7ba" intensity={0.4} />
        <ambientLight intensity={0.3} color="#ffe4e1" />

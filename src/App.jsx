@@ -1,9 +1,23 @@
-import React, { useMemo, useRef, useState, useEffect, Suspense } from 'react';
+import React, { useMemo, useRef, useState, useEffect, Suspense, createContext, useContext } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { PointerLockControls, Environment, Sky, Clouds, Cloud, MeshTransmissionMaterial, Html } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { MeadowScene } from './meadow/MeadowScene';
+import { PortalDoor } from './meadow/PortalDoor';
+import { SixPanelDoorMesh, DoorCasing } from './meadow/SharedDoors';
+
+const GlobalStateContext = createContext();
+export const useGlobalState = () => useContext(GlobalStateContext);
+
+const gateConfig = {
+  z: -140,
+  x: Math.sin(-140 * 0.1) * 2.0 + 4.75,
+  rotY: Math.atan2(Math.cos(-140 * 0.1) * 0.2, -1)
+};
+const gateMatrix = new THREE.Matrix4().makeRotationY(gateConfig.rotY);
+gateMatrix.setPosition(gateConfig.x, 0, gateConfig.z);
+const gateMatrixInverse = gateMatrix.clone().invert();
 
 /* ============================================================
    1. PROCEDURAL TILE TEXTURE GENERATOR
@@ -41,13 +55,14 @@ function useTileMaterial(color, groutColor = '#e2eeef') {
 }
 
 /* ============================================================
-   2. CUSTOM FPS CONTROLLER & PHYSICS (NATIVE AABB)
+   2. CUSTOM FPS CONTROLLER & PHYSICS
    ============================================================ */
-const FPSController = ({ sceneState, teleportTarget, isFrozen }) => {
+const FPSController = ({ teleportTarget }) => {
   const camera = useThree(state => state.camera);
   const moveState = useRef({ forward: false, backward: false, left: false, right: false });
   const velocity = useRef(new THREE.Vector3());
   const position = useRef(new THREE.Vector3(4.75, 1.6, -2)); 
+  const { activeScene, setPlayerMeadowLocalZ } = useGlobalState();
 
   useEffect(() => {
     camera.rotation.order = 'YXZ';
@@ -84,10 +99,6 @@ const FPSController = ({ sceneState, teleportTarget, isFrozen }) => {
   }, [teleportTarget, camera]);
 
   useFrame((_, delta) => {
-    if (isFrozen) {
-      velocity.current.set(0, 0, 0);
-      return;
-    }
     const dt = Math.min(delta, 0.1); 
     const speed = 6.0;
     const damping = 8.0;
@@ -107,29 +118,49 @@ const FPSController = ({ sceneState, teleportTarget, isFrozen }) => {
 
     const camEuler = new THREE.Euler(0, camera.rotation.y, 0);
     const worldVelocity = velocity.current.clone().applyEuler(camEuler);
-    position.current.add(worldVelocity);
+    const nextPos = position.current.clone().add(worldVelocity);
 
-    if (sceneState === 'corridor') {
-      const z = position.current.z;
+    const localPos = nextPos.clone().applyMatrix4(gateMatrixInverse);
+    setPlayerMeadowLocalZ(localPos.z);
+
+    if (activeScene === 'corridor') {
+      const z = nextPos.z;
       const pathCenter = Math.sin(z * 0.1) * 2.0 + 4.75;
       const minX = pathCenter - 1.8; const maxX = pathCenter + 1.8; 
-      if (position.current.x < minX) { position.current.x = minX; velocity.current.x = 0; }
-      if (position.current.x > maxX) { position.current.x = maxX; velocity.current.x = 0; }
-      if (position.current.z > -1) position.current.z = -1;
-      if (position.current.z < -139) position.current.z = -139; 
-    } else if (sceneState === 'meadow') {
-      if (position.current.x < 500 - 3.2) { position.current.x = 500 - 3.2; velocity.current.x = 0; }
-      if (position.current.x > 500 + 3.2) { position.current.x = 500 + 3.2; velocity.current.x = 0; }
-      if (position.current.z < -5.7) { position.current.z = -5.7; velocity.current.z = 0; }
-      if (position.current.z > 5.7) { position.current.z = 5.7; velocity.current.z = 0; }
+      if (nextPos.x < minX) { nextPos.x = minX; velocity.current.x = 0; }
+      if (nextPos.x > maxX) { nextPos.x = maxX; velocity.current.x = 0; }
+      if (nextPos.z > -1) { nextPos.z = -1; velocity.current.z = 0; }
+      
+      // Portal Door bounds (blocks Z < 0 if not walking through open door)
+      if (localPos.z < 0.2) {
+         if (localPos.x < -0.475 || localPos.x > 0.475) {
+            localPos.z = 0.2; velocity.current.z = 0;
+            nextPos.copy(localPos.applyMatrix4(gateMatrix));
+         }
+      }
+    } else {
+      // MEADOW BOUNDS
+      // 5m width (x: -2.5 to 2.5), 12m length (z: -12 to 0)
+      if (localPos.x < -2.3) { localPos.x = -2.3; velocity.current.x = 0; }
+      if (localPos.x > 2.3) { localPos.x = 2.3; velocity.current.x = 0; }
+      if (localPos.z < -11.8) { localPos.z = -11.8; velocity.current.z = 0; }
+      
+      // Door closes behind player at Z < -2.0.
+      if (localPos.z > -0.2) {
+         localPos.z = -0.2; velocity.current.z = 0;
+      }
+      
+      nextPos.copy(localPos.applyMatrix4(gateMatrix));
     }
+
+    position.current.copy(nextPos);
     camera.position.copy(position.current);
   });
   return null;
 };
 
 /* ============================================================
-   3. CORRIDOR GEOMETRY & TRANSITION GATE
+   3. CORRIDOR GEOMETRY
    ============================================================ */
 function applyWorldUVs(geom) {
   geom.computeVertexNormals();
@@ -148,71 +179,7 @@ function applyWorldUVs(geom) {
   }
 }
 
-const Gate = ({ onTrigger, setPrompt, cyanTiles }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const { camera } = useThree();
-  const leftDoor = useRef();
-  const rightDoor = useRef();
-  const canOpenRef = useRef(false);
-  
-  const gateZ = -138;
-  const gateX = Math.sin(gateZ * 0.1) * 2.0 + 4.75;
-  const dX = Math.cos(gateZ * 0.1) * 0.2;
-  const gateRotY = Math.atan2(dX, -1);
-
-  useFrame(() => {
-     const pos = new THREE.Vector3(gateX, 2, gateZ);
-     const dist = camera.position.distanceTo(pos);
-     const lookDir = new THREE.Vector3();
-     camera.getWorldDirection(lookDir);
-     const toGate = pos.clone().sub(camera.position).normalize();
-     const isLooking = lookDir.dot(toGate) > 0.8;
-     
-     canOpenRef.current = dist < 3.5 && isLooking && !isOpen;
-     setPrompt(canOpenRef.current);
-
-     if (isOpen) {
-        leftDoor.current.rotation.y = THREE.MathUtils.damp(leftDoor.current.rotation.y, Math.PI / 1.8, 4, 0.016);
-        rightDoor.current.rotation.y = THREE.MathUtils.damp(rightDoor.current.rotation.y, -Math.PI / 1.8, 4, 0.016);
-     }
-
-     if (isOpen && camera.position.z < gateZ - 0.2) {
-        onTrigger();
-     }
-  });
-
-  useEffect(() => {
-    const onAction = (e) => {
-      if ((e.code === 'KeyE' || e.type === 'mousedown') && canOpenRef.current) {
-         setIsOpen(true);
-         setPrompt(false);
-      }
-    };
-    document.addEventListener('keydown', onAction);
-    document.addEventListener('mousedown', onAction);
-    return () => {
-      document.removeEventListener('keydown', onAction);
-      document.removeEventListener('mousedown', onAction);
-    };
-  }, [setPrompt]);
-
-  return (
-    <group position={[gateX, 0, gateZ]} rotation={[0, gateRotY, 0]}>
-       <mesh position={[0, 1.7, 0]}><boxGeometry args={[2.6, 3.6, 0.2]} /><meshStandardMaterial color="#fff3d1" roughness={0.4} /></mesh>
-       <mesh position={[0, 1.7, 0.05]}><boxGeometry args={[2.4, 3.4, 0.15]} /><meshBasicMaterial color="#000" /></mesh>
-       <group ref={leftDoor} position={[-1.2, 0, 0.12]}>
-         <mesh position={[0.6, 1.7, 0]}><boxGeometry args={[1.2, 3.4, 0.1]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
-       </group>
-       <group ref={rightDoor} position={[1.2, 0, 0.12]}>
-         <mesh position={[-0.6, 1.7, 0]}><boxGeometry args={[1.2, 3.4, 0.1]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
-       </group>
-       <mesh position={[0, 1.7, 0.17]}><boxGeometry args={[0.02, 3.4, 0.02]} /><meshBasicMaterial color="#fff" transparent opacity={0.6} /></mesh>
-       {isOpen && <pointLight position={[0, 2, -1]} color="#ffcc88" intensity={3} distance={6} />}
-    </group>
-  );
-};
-
-const WavyCorridor = ({ onTrigger, setPrompt }) => {
+const WavyCorridor = () => {
   const length = 140;
   const numPortholes = 12;
 
@@ -279,91 +246,86 @@ const WavyCorridor = ({ onTrigger, setPrompt }) => {
           </group>
         );
       })}
-      <mesh position={[4.5, 4, -length - 2]}><boxGeometry args={[14, 8, 2]} /><meshPhysicalMaterial {...cyanTiles} /></mesh>
-      <mesh position={[4.5, 4, 2]}><boxGeometry args={[14, 8, 2]} /><meshPhysicalMaterial {...cyanTiles} /></mesh>
-      <Gate onTrigger={onTrigger} setPrompt={setPrompt} cyanTiles={cyanTiles} />
+      
+      <PortalDoor cyanTiles={cyanTiles} gateConfig={gateConfig} />
     </group>
   );
 };
 
-const OutsideScenery = () => (
-  <group position={[-60, -15, -40]}>
-    <Sky sunPosition={[-100, 2, 20]} turbidity={0.1} rayleigh={0.1} mieCoefficient={0.001} mieDirectionalG={0.9} />
-    <directionalLight position={[-80, 20, 10]} intensity={5.0} color="#ffdd99" castShadow />
-    <Clouds material={THREE.MeshLambertMaterial} limit={400}>
-      <Cloud seed={1} segments={100} bounds={[80, 15, 160]} volume={80} color="#4a88b5" position={[0, -5, 0]} opacity={0.9} />
-      <Cloud seed={2} segments={80} bounds={[70, 10, 150]} volume={60} color="#8bb8d6" position={[-10, 2, 10]} opacity={0.8} />
-      <Cloud seed={3} segments={80} bounds={[60, 8, 140]} volume={50} color="#ffffff" position={[-5, 8, -10]} opacity={0.9} />
-    </Clouds>
-  </group>
-);
+const OutsideScenery = () => {
+  return (
+    <group position={[-60, -15, -40]}>
+      <Sky sunPosition={[-100, 2, 20]} turbidity={0.1} rayleigh={0.1} mieCoefficient={0.001} mieDirectionalG={0.9} />
+      <directionalLight position={[-80, 20, 10]} intensity={5.0} color="#ffdd99" castShadow />
+      <Clouds material={THREE.MeshLambertMaterial} limit={400}>
+        <Cloud seed={1} segments={100} bounds={[80, 15, 160]} volume={80} color="#4a88b5" position={[0, -5, 0]} opacity={0.9} />
+        <Cloud seed={2} segments={80} bounds={[70, 10, 150]} volume={60} color="#8bb8d6" position={[-10, 2, 10]} opacity={0.8} />
+        <Cloud seed={3} segments={80} bounds={[60, 8, 140]} volume={50} color="#ffffff" position={[-5, 8, -10]} opacity={0.9} />
+      </Clouds>
+    </group>
+  );
+};
 
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-  componentDidCatch(error, errorInfo) {
-    console.error("MeadowScene Error:", error, errorInfo);
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-         <group position={[500, 1.6, 5]}>
-           <Html center zIndexRange={[100, 0]}>
-             <div style={{ color: 'red', background: 'black', padding: '20px', border: '2px solid red' }}>
-               <h2>MeadowScene Crashed!</h2>
-               <pre>{this.state.error && this.state.error.toString()}</pre>
-             </div>
-           </Html>
+/* ============================================================
+   NATIVE MEADOW (SHUTTING ENTRY DOOR)
+   ============================================================ */
+const MeadowEntryDoorNative = () => {
+   const doorGroup = useRef();
+   const { playerMeadowLocalZ } = useGlobalState();
+   
+   // We spawn into meadow natively. The door is wide open (-100 deg).
+   // Once player Z < -2.0, swing it shut slowly (to 0 deg).
+   useFrame(() => {
+      if (!doorGroup.current) return;
+      if (playerMeadowLocalZ < -2.0) {
+         doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, 0, 1.5, 0.016);
+      } else {
+         doorGroup.current.rotation.y = -Math.PI * (100 / 180);
+      }
+   });
+
+   return (
+      <group position={[0, 0, 6]}>
+         {/* The wall itself is rendered by MeadowScene, we just need the casing and door */}
+         <DoorCasing />
+         <group position={[0.475, 0, 0]} ref={doorGroup}>
+            <group position={[-0.475, 0, 0]}>
+               <SixPanelDoorMesh />
+            </group>
          </group>
-      );
-    }
-    return this.props.children;
-  }
-}
+      </group>
+   );
+};
 
 /* ============================================================
    6. MAIN APPLICATION
    ============================================================ */
 export default function App() {
   const [entered, setEntered] = useState(false);
-  const [sceneState, setSceneState] = useState('corridor');
   const [teleportTarget, setTeleportTarget] = useState(null);
-  const [fadeOpacity, setFadeOpacity] = useState(0);
   const [gatePrompt, setGatePrompt] = useState(false);
-  const [camFov, setCamFov] = useState(65);
+  const [activeScene, setActiveScene] = useState('corridor'); 
+  const [playerMeadowLocalZ, setPlayerMeadowLocalZ] = useState(140);
   
   useEffect(() => {
      const params = new URLSearchParams(window.location.search);
      if (params.get('scene') === 'meadow') {
-        setSceneState('meadow');
         setEntered(true);
+        setActiveScene('meadow');
+        
+        const targetPos = new THREE.Vector3(0, 1.6, -1).applyMatrix4(gateMatrix);
         if (params.get('cam') === 'ref') {
-           // Reference pose: start of path, looking at far wall
-           // Path is Z from 6 to -6. Start is Z=5 (in meadow coordinates centered at 500)
-           setTeleportTarget({ pos: new THREE.Vector3(500 + 1.25, 1.6, 5), yaw: 0 }); // Math.sin(5 * 0.5) * 1.2 = ~0.71, adjust to center on path? Actually ref has path in front.
-           // wait, if Z=5, sin(5*0.5)*1.2 = 1.2*sin(2.5) = 1.2 * 0.59 = 0.7. Let's just use 500, 1.6, 5.5
-           // Pitch down slightly to match reference framing
-           setTeleportTarget({ pos: new THREE.Vector3(500, 1.6, 5.5), yaw: 0, pitch: -0.1 });
-           setCamFov(65);
+           setTeleportTarget({ pos: targetPos, yaw: gateConfig.rotY, pitch: -0.1 });
         } else {
-           setTeleportTarget({ pos: new THREE.Vector3(500, 1.6, 5), yaw: 0 });
+           setTeleportTarget({ pos: targetPos, yaw: gateConfig.rotY });
         }
      }
   }, []);
 
-  const triggerTransition = () => {
-     setFadeOpacity(1); 
-     setGatePrompt(false);
-     setTimeout(() => {
-        setSceneState('meadow');
-        setTeleportTarget({ pos: new THREE.Vector3(500, 1.6, 5), yaw: 0 });
-        setTimeout(() => setFadeOpacity(0), 100);
-     }, 600);
+  const globalState = {
+     activeScene, setActiveScene,
+     gatePrompt, setGatePrompt,
+     playerMeadowLocalZ, setPlayerMeadowLocalZ
   };
 
   return (
@@ -374,55 +336,56 @@ export default function App() {
         </div>
       )}
       
-      {gatePrompt && (
+      {gatePrompt && activeScene === 'corridor' && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 5, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', letterSpacing: '0.2em', textShadow: '0 0 10px #f99cba' }}>
           <div style={{ marginTop: '20px' }}>[ E ] OPEN</div>
         </div>
       )}
 
-      <div style={{ position: 'absolute', inset: 0, zIndex: 20, pointerEvents: 'none', backgroundColor: '#fff9e6', opacity: fadeOpacity, transition: 'opacity 0.6s ease-in-out' }} />
-
-      <Canvas shadows camera={{ fov: camFov, near: sceneState === 'meadow' ? 0.1 : 0.5 }}>
-        <color attach="background" args={['#2b87b5']} />
-        <Suspense fallback={null}>
-          
-          {sceneState === 'corridor' && (
-            <>
-              <ambientLight intensity={0.6} color="#c9e2ff" />
-              <Environment preset="city" background={false} blur={0.1} />
-              <WavyCorridor onTrigger={triggerTransition} setPrompt={setGatePrompt} />
-              <OutsideScenery />
-            </>
-          )}
-
-          {sceneState === 'meadow' && (
-            <ErrorBoundary>
-              <MeadowScene />
-            </ErrorBoundary>
-          )}
-          
-          {entered && (
-            <>
-              <PointerLockControls />
-              <FPSController sceneState={sceneState} teleportTarget={teleportTarget} isFrozen={fadeOpacity > 0} />
-            </>
-          )}
-
-          <EffectComposer disableNormalPass>
-            {sceneState === 'meadow' ? (
-              <>
-                <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.5} />
-                <Vignette eskil={false} offset={0.1} darkness={0.4} />
-              </>
-            ) : (
-              <>
-                <Bloom luminanceThreshold={0.75} mipmapBlur intensity={0.2} />
-                <Vignette eskil={false} offset={0.1} darkness={0.5} />
-              </>
-            )}
-          </EffectComposer>
-        </Suspense>
-      </Canvas>
+      <GlobalStateContext.Provider value={globalState}>
+         <Canvas shadows camera={{ fov: 65, near: 0.1 }}>
+           <color attach="background" args={['#2b87b5']} />
+           <Suspense fallback={null}>
+             {/* CONDITIONAL ROOT SCENE RENDERING */}
+             {activeScene === 'corridor' && (
+                <>
+                  <Environment preset="city" background={false} blur={0.1} />
+                  <WavyCorridor />
+                  <OutsideScenery />
+                  
+                  <EffectComposer disableNormalPass>
+                    <Bloom luminanceThreshold={0.75} mipmapBlur intensity={0.2} />
+                    <Vignette eskil={false} offset={0.1} darkness={0.5} />
+                  </EffectComposer>
+                </>
+             )}
+             
+             {activeScene === 'meadow' && (
+                <>
+                   {/* NATIVE MEADOW (No double tonemapping, perfectly crisp) */}
+                   <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, gateConfig.rotY, 0]}>
+                      <group position={[0, 0, -6]}>
+                         <MeadowScene />
+                         <MeadowEntryDoorNative />
+                      </group>
+                   </group>
+                   
+                   <EffectComposer disableNormalPass>
+                     <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.5} />
+                     <Vignette eskil={false} offset={0.1} darkness={0.4} />
+                   </EffectComposer>
+                </>
+             )}
+             
+             {entered && (
+               <>
+                 <PointerLockControls />
+                 <FPSController teleportTarget={teleportTarget} />
+               </>
+             )}
+           </Suspense>
+         </Canvas>
+      </GlobalStateContext.Provider>
     </div>
   );
 }

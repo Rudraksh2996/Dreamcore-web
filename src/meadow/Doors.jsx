@@ -1,113 +1,36 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import * as THREE from 'three';
-
-const DoorCasing = ({ pinkMat }) => {
-  return (
-    <group>
-      {/* Left jamb */}
-      <mesh position={[-0.485, 1.025, 0.02]} castShadow receiveShadow>
-        <boxGeometry args={[0.07, 2.05, 0.08]} />
-        <meshStandardMaterial {...pinkMat} />
-      </mesh>
-      {/* Right jamb */}
-      <mesh position={[0.485, 1.025, 0.02]} castShadow receiveShadow>
-        <boxGeometry args={[0.07, 2.05, 0.08]} />
-        <meshStandardMaterial {...pinkMat} />
-      </mesh>
-      {/* Head casing */}
-      <mesh position={[0, 2.085, 0.02]} castShadow receiveShadow>
-        <boxGeometry args={[1.04, 0.07, 0.08]} />
-        <meshStandardMaterial {...pinkMat} />
-      </mesh>
-    </group>
-  );
-};
-
-const SixPanelDoorMesh = ({ pinkMat }) => {
-  return (
-    <group>
-      {/* Main Slab */}
-      <mesh position={[0, 1.025, 0]} castShadow receiveShadow>
-        <boxGeometry args={[0.9, 2.05, 0.04]} />
-        <meshStandardMaterial {...pinkMat} />
-      </mesh>
-
-      {/* Panels (fake with small bevel boxes) */}
-      {[ 
-        [0.2, 1.75, 0.3, 0.3], [-0.2, 1.75, 0.3, 0.3], // Top short pair
-        [0.2, 1.05, 0.3, 0.9], [-0.2, 1.05, 0.3, 0.9], // Middle tall pair
-        [0.2, 0.35, 0.3, 0.3], [-0.2, 0.35, 0.3, 0.3]  // Bottom short pair
-      ].map((p, i) => (
-        <group key={i}>
-          {/* Front Panel */}
-          <mesh position={[p[0], p[1], 0.025]}>
-            <boxGeometry args={[p[2], p[3], 0.01]} />
-            <meshStandardMaterial {...pinkMat} />
-          </mesh>
-          {/* Back Panel */}
-          <mesh position={[p[0], p[1], -0.025]}>
-            <boxGeometry args={[p[2], p[3], 0.01]} />
-            <meshStandardMaterial {...pinkMat} />
-          </mesh>
-        </group>
-      ))}
-
-      {/* Silver Knob */}
-      <group position={[0.35, 1.05, 0]}>
-        <mesh position={[0, 0, 0.03]} rotation={[Math.PI/2, 0, 0]}><cylinderGeometry args={[0.03, 0.03, 0.01]}/><meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} /></mesh>
-        <mesh position={[0, 0, 0.05]}><sphereGeometry args={[0.025, 16, 16]}/><meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} /></mesh>
-        
-        {/* Back knob */}
-        <mesh position={[0, 0, -0.03]} rotation={[Math.PI/2, 0, 0]}><cylinderGeometry args={[0.03, 0.03, 0.01]}/><meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} /></mesh>
-        <mesh position={[0, 0, -0.05]}><sphereGeometry args={[0.025, 16, 16]}/><meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} /></mesh>
-      </group>
-
-      {/* Hinges (Black) */}
-      {[0.2, 1.025, 1.85].map((y, i) => (
-        <mesh key={i} position={[-0.45, y, 0.025]}>
-          <boxGeometry args={[0.01, 0.08, 0.01]} />
-          <meshStandardMaterial color="#111" roughness={0.7} />
-        </mesh>
-      ))}
-    </group>
-  );
-};
+import { DoorCasing, SixPanelDoorMesh } from './SharedDoors';
 
 export const Doors = () => {
-  const pinkMatProps = {
-    color: '#f2a7ba', // base salmon-pink
-    roughness: 0.45,
-    metalness: 0.0,
-    clearcoat: 0.1, // slight semigloss
-  };
 
   return (
     <group position={[0, 0, -5.99]}>
       {/* Left Door (Closed) */}
       <group position={[-1.2, 0, 0]}>
-        <DoorCasing pinkMat={pinkMatProps} />
-        <SixPanelDoorMesh pinkMat={pinkMatProps} />
+        <DoorCasing />
+        <SixPanelDoorMesh />
       </group>
 
       {/* Right Door (Open to void) */}
       <group position={[1.2, 0, 0]}>
-        <DoorCasing pinkMat={pinkMatProps} />
+        <DoorCasing />
         
         {/* Pitch Black Void */}
-        <mesh position={[0, 1.025, -0.02]}>
-          <boxGeometry args={[0.9, 2.05, 0.01]} />
+        <mesh position={[0, 1.05, -0.02]}>
+          <boxGeometry args={[0.95, 2.1, 0.01]} />
           <meshBasicMaterial color="#020504" />
         </mesh>
         {/* Deep void volume for trigger */}
-        <mesh position={[0, 1.025, -1.0]}>
-          <boxGeometry args={[0.9, 2.05, 2.0]} />
+        <mesh position={[0, 1.05, -1.0]}>
+          <boxGeometry args={[0.95, 2.1, 2.0]} />
           <meshBasicMaterial color="#020504" side={THREE.BackSide} />
         </mesh>
 
         {/* Swung Door */}
-        <group position={[-0.45, 0, 0]} rotation={[0, -Math.PI / 1.7, 0]}>
-           <group position={[0.45, 0, 0]}>
-             <SixPanelDoorMesh pinkMat={pinkMatProps} />
+        <group position={[-0.475, 0, 0]} rotation={[0, -Math.PI / 1.7, 0]}>
+           <group position={[0.475, 0, 0]}>
+             <SixPanelDoorMesh />
            </group>
         </group>
       </group>

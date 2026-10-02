@@ -51,7 +51,7 @@ export const SunFixture = ({ position }) => {
       </mesh>
       
       {/* Warm Point Light */}
-      <pointLight distance={10} decay={2} intensity={2.5} color="#d6f26a" position={[0, -0.2, 0]} />
+      <pointLight distance={10} decay={2} intensity={1.2} color="#d6f26a" position={[0, -0.2, 0]} />
     </group>
   );
 };
