@@ -368,6 +368,7 @@ export default function App() {
   };
 
   const [debugInfo, setDebugInfo] = useState({});
+  const [doorDebug, setDoorDebug] = useState(null);
   const [showWireframes, setShowWireframes] = useState(false);
   
   useEffect(() => {
@@ -375,8 +376,8 @@ export default function App() {
         const onKey = (e) => { if (e.code === 'KeyK') setShowWireframes(s => !s); };
         window.addEventListener('keydown', onKey);
         
-        // Expose a global setter for the FPSController to push debug data without re-rendering everything rapidly if possible, but React state is fine for this demo
         window.setDebugInfo = setDebugInfo;
+        window.setDoorDebug = setDoorDebug;
         
         return () => window.removeEventListener('keydown', onKey);
      }
@@ -390,6 +391,16 @@ export default function App() {
             <div>Signed Dist: {debugInfo.sDist?.toFixed(2)}</div>
             <div>Pos X: {debugInfo.x?.toFixed(2)} Z: {debugInfo.z?.toFixed(2)}</div>
             <div>Active Bounds: {debugInfo.bounds}</div>
+            {doorDebug && (
+               <>
+                 <div>Door Dist: {doorDebug.dist?.toFixed(2)}</div>
+                 <div>Ray hits door: {doorDebug.isLooking ? 'yes' : 'no'}</div>
+                 <div>In range: {doorDebug.inRange ? 'yes' : 'no'}</div>
+                 <div>Door state: {doorDebug.isOpen ? 'open' : 'closed'}</div>
+                 <div>Portal blend: {doorDebug.blend?.toFixed(2)}</div>
+                 <div>Meadow renders: {doorDebug.meadowRenders ? 'yes' : 'no'}</div>
+               </>
+            )}
             <div>Wireframes (K): {showWireframes ? 'ON' : 'OFF'}</div>
          </div>
       )}

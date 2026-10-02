@@ -22,32 +22,41 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
      const dist = camera.position.distanceTo(doorPos);
      
      const sDist = signedDistance(camera.position);
-     setPlayerMeadowLocalZ(sDist);
+     if (Math.abs(window._lastSDist - sDist) > 0.05) {
+        setPlayerMeadowLocalZ(sDist);
+        window._lastSDist = sDist;
+     }
      
      const lookDir = new THREE.Vector3();
      camera.getWorldDirection(lookDir);
      const toGate = doorPos.clone().sub(camera.position).normalize();
      const isLooking = lookDir.dot(toGate) > 0.7;
+     const inRange = dist < 3.5;
      
-     canOpenRef.current = dist < 3.5 && isLooking && !isOpen;
+     canOpenRef.current = inRange && isLooking && !isOpen;
      setGatePrompt(canOpenRef.current);
 
      if (isOpen && doorGroup.current) {
         doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, -Math.PI * (100 / 180), 4, 0.016);
      }
      
+     let blendVal = 0.0;
      // Seamless crossing logic
      if (isOpen) {
         if (sDist > -0.1 && dist < 3.0) {
            if (portalRef.current) {
-              // Blend to 1.0 right before crossing completely
-              portalRef.current.blend = THREE.MathUtils.clamp(sDist * 2.0, 0, 1);
+              blendVal = THREE.MathUtils.clamp(sDist * 2.0, 0, 1);
+              portalRef.current.blend = blendVal;
            }
         }
         // Actually swap scenes when fully crossed (e.g. sDist > 0.1)
         if (sDist > 0.1 && dist < 3.0) {
            setActiveScene('meadow');
         }
+     }
+     
+     if (window.setDoorDebug) {
+        window.setDoorDebug({ dist, isLooking, inRange, isOpen, blend: blendVal, meadowRenders: isOpen });
      }
   });
 
@@ -66,25 +75,27 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
     };
   }, [setGatePrompt]);
 
-  const leftWidth = 2.025;
-  const rightWidth = 2.025;
-  const lintelHeight = 1.1;
+  const leftWidth = 2.525;
+  const rightWidth = 2.525;
+  const lintelHeight = 5.9; // 8.0 - 2.1
 
   // The portal mesh is just the doorway hole (0.95 x 2.1)
   return (
     <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, gateConfig.rotY, 0]}>
        {/* Wall Pieces - Corridor Side (Cyan) */}
-       <mesh position={[-0.475 - leftWidth/2, 1.6, 0.15]}><boxGeometry args={[leftWidth, 3.2, 0.3]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
-       <mesh position={[0.475 + rightWidth/2, 1.6, 0.15]}><boxGeometry args={[rightWidth, 3.2, 0.3]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
+       <mesh position={[-0.475 - leftWidth/2, 4.0, 0.15]}><boxGeometry args={[leftWidth, 8.0, 0.3]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
+       <mesh position={[0.475 + rightWidth/2, 4.0, 0.15]}><boxGeometry args={[rightWidth, 8.0, 0.3]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
        <mesh position={[0, 2.1 + lintelHeight/2, 0.15]}><boxGeometry args={[0.95, lintelHeight, 0.3]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
        
        {/* Corridor-side Casing */}
        <DoorCasing />
+       
+       <pointLight position={[0, 2, 2]} intensity={2.0} color="#ffffff" distance={10} decay={2} />
 
        {/* If closed, show a fake solid door to avoid rendering the heavy Meadow portal */}
        {!isOpen && (
          <group position={[0.475, 0, 0]}>
-           <group position={[-0.475, 0, 0]}>
+           <group position={[-0.475, 0, 0]} rotation={[0, Math.PI, 0]}>
              <SixPanelDoorMesh />
            </group>
          </group>
@@ -103,7 +114,7 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
              
              {/* Meadow-side Door Leaf and Casing (rendered inside portal so it can swing into it) */}
              <group position={[0.475, -1.05, 0]} ref={doorGroup}>
-               <group position={[-0.475, 0, 0]}>
+               <group position={[-0.475, 0, 0]} rotation={[0, Math.PI, 0]}>
                  <SixPanelDoorMesh />
                </group>
              </group>
