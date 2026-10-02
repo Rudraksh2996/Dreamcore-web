@@ -9,11 +9,10 @@ import { useGlobalState } from '../App';
 
 export const PortalDoor = ({ cyanTiles, gateConfig }) => {
   const { camera } = useThree();
-  const [isOpen, setIsOpen] = useState(false);
   const doorGroup = useRef();
   const portalRef = useRef();
   const canOpenRef = useRef(false);
-  const { setGatePrompt, setActiveScene, setPlayerMeadowLocalZ } = useGlobalState();
+  const { gatePrompt, setGatePrompt, setActiveScene, setPlayerMeadowLocalZ, doorOpen: isOpen, setDoorOpen: setIsOpen } = useGlobalState();
 
   const { doorPos, forward, signedDistance } = React.useMemo(() => getDoorFrame(gateConfig), [gateConfig]);
 
@@ -34,7 +33,10 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
      const inRange = dist < 3.5;
      
      canOpenRef.current = inRange && isLooking && !isOpen;
-     setGatePrompt(canOpenRef.current);
+     // Don't flutter the prompt unnecessarily
+     if (canOpenRef.current !== gatePrompt) {
+         setGatePrompt(canOpenRef.current);
+     }
 
      if (isOpen && doorGroup.current) {
         doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, -Math.PI * (100 / 180), 4, 0.016);

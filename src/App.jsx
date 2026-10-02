@@ -148,24 +148,33 @@ const FPSController = ({ teleportTarget }) => {
       if (nextPos.x > maxX) { nextPos.x = maxX; velocity.current.x = 0; }
       if (nextPos.z > -1) { nextPos.z = -1; velocity.current.z = 0; }
       
-      // Portal Door bounds: block walking past the door plane UNLESS within the opening
-      if (sDist > -0.2) {
-         boundsString = 'Corridor + Door Block';
-         const lat = signedLateral(nextPos);
-         if (lat < -0.475 || lat > 0.475 || sDist > 0.0) {
-            // Push back to corridor side
-            const pushBack = doorPos.clone().add(forward.clone().multiplyScalar(-0.2));
-            const pushLat = doorPos.clone().add(right.clone().multiplyScalar(lat));
-            nextPos.x = pushLat.x + forward.x * -0.2;
-            nextPos.z = pushLat.z + forward.z * -0.2;
-            velocity.current.x = 0; velocity.current.z = 0;
-         }
-      }
-    } else {
+        // Portal Door bounds: block walking past the door plane UNLESS within the opening
+        if (sDist > -0.2) {
+           boundsString = 'Corridor + Door Block';
+           const lat = signedLateral(nextPos);
+           const radius = 0.2; // 0.4m diameter
+           if (lat < -0.475 + radius || lat > 0.475 - radius) {
+              boundsString = 'Doorway Side Wall';
+              // Push back to corridor side
+              const safeLat = THREE.MathUtils.clamp(lat, -0.475 + radius, 0.475 - radius);
+              const pushLat = doorPos.clone().add(right.clone().multiplyScalar(safeLat));
+              nextPos.x = pushLat.x + forward.x * -0.2;
+              nextPos.z = pushLat.z + forward.z * -0.2;
+              velocity.current.x = 0; velocity.current.z = 0;
+           } else if (!globalState?.doorOpen && sDist > 0.0) {
+              boundsString = 'Closed Door Leaf';
+              const pushLat = doorPos.clone().add(right.clone().multiplyScalar(lat));
+              nextPos.x = pushLat.x + forward.x * -0.05;
+              nextPos.z = pushLat.z + forward.z * -0.05;
+              velocity.current.x = 0; velocity.current.z = 0;
+           }
+        }
+      } else {
       boundsString = 'Meadow';
       // MEADOW BOUNDS
       // 5m width (-2.5 to 2.5), 12m length (sDist 0 to 12)
       const lat = signedLateral(nextPos);
+      const radius = 0.2;
       if (lat < -2.3) { 
          const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(-2.3));
          nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
@@ -179,9 +188,16 @@ const FPSController = ({ teleportTarget }) => {
          nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
       }
       
+      if (sDist > 2.5 && globalState?.doorOpen) {
+         if (globalState?.setDoorOpen) globalState.setDoorOpen(false);
+      }
+      
       // Door closes behind player at sDist > 2.0. Prevent walking back into it.
-      if (sDist < 0.2) {
-         const p = doorPos.clone().add(forward.clone().multiplyScalar(0.2)).add(right.clone().multiplyScalar(lat));
+      // But while crossing (door is open), allow them to stand in the doorway (down to sDist = -0.2)
+      const minSDist = globalState?.doorOpen ? -0.2 : 0.05;
+      if (sDist < minSDist) {
+         const latClamp = globalState?.doorOpen ? THREE.MathUtils.clamp(lat, -0.475 + radius, 0.475 - radius) : lat;
+         const p = doorPos.clone().add(forward.clone().multiplyScalar(minSDist)).add(right.clone().multiplyScalar(latClamp));
          nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
       }
     }
@@ -308,16 +324,17 @@ const OutsideScenery = () => {
    ============================================================ */
 const MeadowEntryDoorNative = () => {
    const doorGroup = useRef();
-   const { playerMeadowLocalZ } = useGlobalState(); // This is now sDist
+   const { doorOpen } = useGlobalState();
    
-   // We spawn into meadow natively. The door is wide open (-100 deg).
-   // Once player sDist > 2.0, swing it shut slowly (to 0 deg).
+   // We spawn into meadow natively. The door is wide open (-100 deg) if doorOpen is true.
+   // Once player sDist > 2.5, FPSController sets doorOpen to false, and we swing it shut slowly (to 0 deg).
    useFrame(() => {
       if (!doorGroup.current) return;
-      if (playerMeadowLocalZ > 2.0) {
+      if (!doorOpen) {
          doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, 0, 1.5, 0.016);
       } else {
-         doorGroup.current.rotation.y = -Math.PI * (100 / 180);
+         // Keep swinging open or holding open
+         doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, -Math.PI * (100 / 180), 4, 0.016);
       }
    });
 
@@ -326,7 +343,7 @@ const MeadowEntryDoorNative = () => {
          {/* The wall itself is rendered by MeadowScene, we just need the casing and door */}
          <DoorCasing />
          <group position={[0.475, 0, 0]} ref={doorGroup}>
-            <group position={[-0.475, 0, 0]}>
+            <group position={[-0.475, 0, 0]} rotation={[0, Math.PI, 0]}>
                <SixPanelDoorMesh />
             </group>
          </group>
@@ -341,6 +358,7 @@ export default function App() {
   const [entered, setEntered] = useState(false);
   const [teleportTarget, setTeleportTarget] = useState(null);
   const [gatePrompt, setGatePrompt] = useState(false);
+  const [doorOpen, setDoorOpen] = useState(false);
   const [activeScene, setActiveScene] = useState('corridor'); 
   const [playerMeadowLocalZ, setPlayerMeadowLocalZ] = useState(140);
   
@@ -364,6 +382,7 @@ export default function App() {
   const globalState = {
      activeScene, setActiveScene,
      gatePrompt, setGatePrompt,
+     doorOpen, setDoorOpen,
      playerMeadowLocalZ, setPlayerMeadowLocalZ
   };
 
