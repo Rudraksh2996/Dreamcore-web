@@ -41,16 +41,17 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
         doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, -Math.PI * (100 / 180), 4, 0.016);
      }
      
-     // Seamless crossing logic: if player crosses the portal threshold (local Z < 0)
-     if (isOpen && localPos.z < 0.1) {
-        // As they get close, blend the portal to fill screen (optional, helps hide clipping)
-        if (portalRef.current) {
-           portalRef.current.blend = THREE.MathUtils.clamp(1.0 - (localPos.z * 2.0), 0, 1);
+     // Seamless crossing logic
+     if (isOpen) {
+        if (localPos.z < 0.1 && dist < 3.0) {
+           if (portalRef.current) {
+              portalRef.current.blend = THREE.MathUtils.clamp(1.0 - (localPos.z * 2.0), 0, 1);
+           }
         }
-     }
-     
-     if (localPos.z < -0.1) {
-        setActiveScene('meadow');
+        // Actually swap scenes when fully crossed
+        if (localPos.z < -0.1 && dist < 3.0) {
+           setActiveScene('meadow');
+        }
      }
   });
 

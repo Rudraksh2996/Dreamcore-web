@@ -308,17 +308,19 @@ export default function App() {
   const [playerMeadowLocalZ, setPlayerMeadowLocalZ] = useState(140);
   
   useEffect(() => {
-     const params = new URLSearchParams(window.location.search);
-     if (params.get('scene') === 'meadow') {
-        setEntered(true);
-        setActiveScene('meadow');
-        
-        const targetPos = new THREE.Vector3(0, 1.6, -1).applyMatrix4(gateMatrix);
-        if (params.get('cam') === 'ref') {
-           setTeleportTarget({ pos: targetPos, yaw: gateConfig.rotY, pitch: -0.1 });
-        } else {
-           setTeleportTarget({ pos: targetPos, yaw: gateConfig.rotY });
-        }
+     if (import.meta.env.DEV) {
+       const params = new URLSearchParams(window.location.search);
+       if (params.get('scene') === 'meadow') {
+          setEntered(true);
+          setActiveScene('meadow');
+          
+          const targetPos = new THREE.Vector3(0, 1.6, -1).applyMatrix4(gateMatrix);
+          if (params.get('cam') === 'ref') {
+             setTeleportTarget({ pos: targetPos, yaw: gateConfig.rotY, pitch: -0.1 });
+          } else {
+             setTeleportTarget({ pos: targetPos, yaw: gateConfig.rotY });
+          }
+       }
      }
   }, []);
 
