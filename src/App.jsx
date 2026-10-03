@@ -429,6 +429,11 @@ export default function App() {
         </div>
       )}
       
+      {/* Background Audio Loop */}
+      {entered && (
+         <audio src="/bg-loop.mp3" autoPlay loop style={{ display: 'none' }} />
+      )}
+      
       {gatePrompt && activeScene === 'corridor' && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 5, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', letterSpacing: '0.2em', textShadow: '0 0 10px #f99cba' }}>
           <div style={{ marginTop: '20px' }}>[ E ] OPEN</div>
