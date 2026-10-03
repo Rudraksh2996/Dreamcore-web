@@ -424,15 +424,17 @@ export default function App() {
          </div>
       )}
       {!entered && (
-        <div onClick={() => setEntered(true)} style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, #5ab8d2 0%, #f99cba 100%)', cursor: 'pointer', color: '#fff', letterSpacing: '0.4em', fontSize: '15px' }}>
+        <div onClick={() => {
+           setEntered(true);
+           const audioEl = document.getElementById('bg-audio');
+           if (audioEl) audioEl.play().catch(e => console.error("Audio play failed:", e));
+        }} style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, #5ab8d2 0%, #f99cba 100%)', cursor: 'pointer', color: '#fff', letterSpacing: '0.4em', fontSize: '15px' }}>
           CLICK TO ENTER THE DREAM
         </div>
       )}
       
-      {/* Background Audio Loop */}
-      {entered && (
-         <audio src="/bg-loop.mp3" autoPlay loop style={{ display: 'none' }} />
-      )}
+      {/* Background Audio Loop (preloaded for instant playback) */}
+      <audio id="bg-audio" src="/bg-loop.mp3" preload="auto" loop style={{ display: 'none' }} />
       
       {gatePrompt && activeScene === 'corridor' && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 5, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', letterSpacing: '0.2em', textShadow: '0 0 10px #f99cba' }}>
