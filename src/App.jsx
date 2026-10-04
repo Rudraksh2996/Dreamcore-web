@@ -192,7 +192,7 @@ const FPSController = ({ teleportTarget }) => {
          const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(2.35));
          nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
       }
-      if (sDist > 11.85) { 
+      if (sDist > 11.85 && !globalState.poolroomDoorOpen) { 
          const p = doorPos.clone().add(forward.clone().multiplyScalar(11.85)).add(right.clone().multiplyScalar(lat));
          nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
       }
@@ -433,6 +433,7 @@ export default function App() {
   const [teleportTarget, setTeleportTarget] = useState(null);
   const [gatePrompt, setGatePrompt] = useState(false);
   const [doorOpen, setDoorOpen] = useState(false);
+  const [poolroomDoorOpen, setPoolroomDoorOpen] = useState(false);
   const [activeScene, setActiveScene] = useState('corridor'); 
   const [playerMeadowLocalZ, setPlayerMeadowLocalZ] = useState(140);
   
@@ -452,7 +453,7 @@ export default function App() {
        } else if (params.get('scene') === 'poolroom') {
           setEntered(true);
           setActiveScene('poolroom');
-          setTeleportTarget({ pos: new THREE.Vector3(0, 1.6, -1), yaw: 0 });
+          setTeleportTarget({ pos: new THREE.Vector3(gateConfig.x - 1.2, 1.6, gateConfig.z - 12.99), yaw: 0 });
        }
      }
   }, []);
@@ -461,6 +462,7 @@ export default function App() {
      activeScene, setActiveScene,
      gatePrompt, setGatePrompt,
      doorOpen, setDoorOpen,
+     poolroomDoorOpen, setPoolroomDoorOpen,
      playerMeadowLocalZ, setPlayerMeadowLocalZ
   };
 

@@ -12,8 +12,7 @@ export const PoolroomPortalDoor = ({ position, rotation }) => {
   const portalRef = useRef();
   const canOpenRef = useRef(false);
   
-  const [isOpen, setIsOpen] = useState(false);
-  const { gatePrompt, setGatePrompt, setActiveScene } = useGlobalState();
+  const { gatePrompt, setGatePrompt, setActiveScene, poolroomDoorOpen: isOpen, setPoolroomDoorOpen: setIsOpen } = useGlobalState();
 
   const doorPos = useMemo(() => new THREE.Vector3(...(position || [0,0,0])), [position]);
 
