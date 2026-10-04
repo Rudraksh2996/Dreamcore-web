@@ -90,7 +90,7 @@ const GrassChunk = ({ cx, cz, geom, mat }) => {
   return <instancedMesh ref={meshRef} args={[geom, mat, Math.floor(CHUNK_SIZE * CHUNK_SIZE * GRASS_DENSITY)]} receiveShadow castShadow />;
 };
 
-export const Grass = () => {
+export const Grass = (props) => {
   const [geom, mat] = useMemo(() => {
     // 4 segments, base height 10cm
     const baseHeight = 0.10; 
@@ -244,7 +244,7 @@ export const Grass = () => {
   }
 
   return (
-    <group>
+    <group {...props}>
       {chunks}
       <mesh position={[0, -0.005, 0]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>
         <planeGeometry args={[MEADOW_WIDTH, MEADOW_LENGTH]} />

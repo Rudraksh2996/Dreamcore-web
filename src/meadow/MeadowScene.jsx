@@ -90,36 +90,36 @@ export const MeadowScene = () => {
        <ambientLight intensity={0.3} color="#ffe4e1" />
        
        {/* Walls (Standard Material for lighting response) */}
-       <mesh position={[-3.5, 1.6, 0]} rotation={[0, Math.PI/2, 0]} receiveShadow><planeGeometry args={[12, 3.2]} /><meshStandardMaterial map={texLeft} roughness={0.9} /></mesh>
-       <mesh position={[3.5, 1.6, 0]} rotation={[0, -Math.PI/2, 0]} receiveShadow><planeGeometry args={[12, 3.2]} /><meshStandardMaterial map={texRight} roughness={0.9} /></mesh>
-       <mesh position={[0, 1.6, -6]} receiveShadow><planeGeometry args={[7, 3.2]} /><meshStandardMaterial map={texFront} roughness={0.9} /></mesh>
-       <mesh position={[0, 1.6, 6]} rotation={[0, Math.PI, 0]} receiveShadow><planeGeometry args={[7, 3.2]} /><meshStandardMaterial map={texBack} roughness={0.9} /></mesh>
+       <mesh position={[-3.5, 1.6, -6]} rotation={[0, Math.PI/2, 0]} receiveShadow><planeGeometry args={[12, 3.2]} /><meshStandardMaterial map={texLeft} roughness={0.9} /></mesh>
+       <mesh position={[3.5, 1.6, -6]} rotation={[0, -Math.PI/2, 0]} receiveShadow><planeGeometry args={[12, 3.2]} /><meshStandardMaterial map={texRight} roughness={0.9} /></mesh>
+       <mesh position={[0, 1.6, -12]} receiveShadow><planeGeometry args={[7, 3.2]} /><meshStandardMaterial map={texFront} roughness={0.9} /></mesh>
+       <mesh position={[0, 1.6, 0]} rotation={[0, Math.PI, 0]} receiveShadow><planeGeometry args={[7, 3.2]} /><meshStandardMaterial map={texBack} roughness={0.9} /></mesh>
        
        {/* Ceiling */}
-       <mesh position={[0, 3.2, 0]} rotation={[Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[7, 12]} /><meshStandardMaterial map={texCeil} roughness={1.0} /></mesh>
+       <mesh position={[0, 3.2, -6]} rotation={[Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[7, 12]} /><meshStandardMaterial map={texCeil} roughness={1.0} /></mesh>
        
        {/* Trim (offset by 5mm to avoid z-fighting with walls/ceiling/floor) */}
        {/* Baseboard */}
-       <mesh position={[0, 0.05, 0]} receiveShadow>
+       <mesh position={[0, 0.05, -6]} receiveShadow>
          <boxGeometry args={[6.99, 0.1, 11.99]} />
          <meshStandardMaterial color="#f2a7ba" roughness={0.45} side={THREE.BackSide} />
        </mesh>
        {/* Crown molding (Cove + Bead profile via simple box for now, offset down from ceiling) */}
-       <mesh position={[0, 3.14, 0]} receiveShadow>
+       <mesh position={[0, 3.14, -6]} receiveShadow>
          <boxGeometry args={[6.99, 0.12, 11.99]} />
          <meshStandardMaterial color="#f2a7ba" roughness={0.45} side={THREE.BackSide} />
        </mesh>
 
        {/* Path (raised 1cm above floor) */}
-       <mesh position={[0, 0.01, 0]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>
+       <mesh position={[0, 0.01, -6]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>
          <planeGeometry args={[7, 12]} />
          <meshStandardMaterial map={pathTex} transparent alphaTest={0.05} roughness={0.95} />
        </mesh>
        
-       <Grass />
+       <Grass position={[0, 0, -6]} />
        
-       <SunFixture position={[0, 3.19, 0]} />
-       <Doors />
+       <SunFixture position={[0, 3.19, -6]} />
+       <Doors position={[0, 0, -6]} />
     </group>
   );
 };

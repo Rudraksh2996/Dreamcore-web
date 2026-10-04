@@ -51,8 +51,8 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
               portalRef.current.blend = blendVal;
            }
         }
-        // Actually swap scenes when fully crossed (e.g. sDist > 0.1)
-        if (sDist > 0.1 && dist < 3.0) {
+        // Actually swap scenes when fully crossed (e.g. sDist > 0.0)
+        if (sDist > 0.0 && dist < 3.0) {
            setActiveScene('meadow');
         }
      }
@@ -85,9 +85,9 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
   return (
     <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, gateConfig.rotY, 0]}>
        {/* Wall Pieces - Corridor Side (Cyan) */}
-       <mesh position={[-0.475 - leftWidth/2, 4.0, 0.15]}><boxGeometry args={[leftWidth, 8.0, 0.3]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
-       <mesh position={[0.475 + rightWidth/2, 4.0, 0.15]}><boxGeometry args={[rightWidth, 8.0, 0.3]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
-       <mesh position={[0, 2.1 + lintelHeight/2, 0.15]}><boxGeometry args={[0.95, lintelHeight, 0.3]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
+       <mesh position={[-0.475 - leftWidth/2, 4.0, 0.075]}><boxGeometry args={[leftWidth, 8.0, 0.15]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
+       <mesh position={[0.475 + rightWidth/2, 4.0, 0.075]}><boxGeometry args={[rightWidth, 8.0, 0.15]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
+       <mesh position={[0, 2.1 + lintelHeight/2, 0.075]}><boxGeometry args={[0.95, lintelHeight, 0.15]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
        
        {/* Corridor-side Casing */}
        <DoorCasing />
@@ -103,27 +103,26 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
          </group>
        )}
 
-       {/* The Portal (only mounts when opening) */}
-       {isOpen && (
-         <mesh position={[0, 1.05, 0]}>
-           <planeGeometry args={[0.95, 2.1]} />
-           <MeshPortalMaterial ref={portalRef} blend={0.0}>
-             {/* INSIDE THE PORTAL: Isolated Meadow Scene */}
-             {/* Offset so that the corridor door sits at local Z=0. Meadow is 12m long, offset by Z=-6 */}
-             <group position={[0, 0, -6]}>
-                <MeadowScene />
-             </group>
-             
-             {/* Meadow-side Door Leaf and Casing (rendered inside portal so it can swing into it) */}
-             <group position={[0.475, -1.05, 0]} ref={doorGroup}>
-               <group position={[-0.475, 0, 0]} rotation={[0, Math.PI, 0]}>
-                 <SixPanelDoorMesh />
-               </group>
-             </group>
-             
-           </MeshPortalMaterial>
-         </mesh>
-       )}
+       {/* The Portal (always mounted, but hidden if far away and closed) */}
+       <mesh position={[0, 1.05, 0]} visible={isOpen || camera.position.distanceTo(doorPos) <= 45}>
+         <planeGeometry args={[0.95, 2.1]} />
+         <MeshPortalMaterial ref={portalRef} blend={0.0} worldUnits={true} side={THREE.DoubleSide} resolution={window.devicePixelRatio || 1}>
+           <color attach="background" args={['#0c2230']} />
+           <fog attach="fog" args={['#0c2230', 2, 25]} />
+           {/* INSIDE THE PORTAL: Isolated Meadow Scene */}
+           {/* The portal mesh is at Y=1.05. We offset by Y=-1.05 so the Meadow's origin is flush with the floor. */}
+           <group position={[0, -1.05, 0]}>
+              <MeadowScene />
+              
+              {/* Meadow-side Door Leaf and Casing (rendered inside portal so it can swing into it) */}
+              <group position={[0.475, 0, 0]} ref={doorGroup}>
+                <group position={[-0.475, 0, 0]} rotation={[0, Math.PI, 0]}>
+                  <SixPanelDoorMesh />
+                </group>
+              </group>
+           </group>
+         </MeshPortalMaterial>
+       </mesh>
     </group>
   );
 };

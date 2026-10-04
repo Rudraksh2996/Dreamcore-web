@@ -339,7 +339,7 @@ const MeadowEntryDoorNative = () => {
    });
 
    return (
-      <group position={[0, 0, 6]}>
+      <group position={[0, 0, 0]}>
          {/* The wall itself is rendered by MeadowScene, we just need the casing and door */}
          <DoorCasing />
          <group position={[0.475, 0, 0]} ref={doorGroup}>
@@ -443,8 +443,9 @@ export default function App() {
       )}
 
       <GlobalStateContext.Provider value={globalState}>
-         <Canvas shadows camera={{ fov: 65, near: 0.1 }}>
-           <color attach="background" args={['#2b87b5']} />
+         <Canvas shadows camera={{ fov: 65, near: 0.01 }}>
+           <color attach="background" args={[activeScene === 'meadow' ? '#0c2230' : '#2b87b5']} />
+           {activeScene === 'meadow' && <fog attach="fog" args={['#0c2230', 2, 25]} />}
            <Suspense fallback={null}>
              {/* CONDITIONAL ROOT SCENE RENDERING */}
              {activeScene === 'corridor' && (
@@ -464,10 +465,8 @@ export default function App() {
                 <>
                    {/* NATIVE MEADOW (No double tonemapping, perfectly crisp) */}
                    <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, gateConfig.rotY, 0]}>
-                      <group position={[0, 0, -6]}>
-                         <MeadowScene />
-                         <MeadowEntryDoorNative />
-                      </group>
+                      <MeadowScene />
+                      <MeadowEntryDoorNative />
                    </group>
                    
                    <EffectComposer disableNormalPass>

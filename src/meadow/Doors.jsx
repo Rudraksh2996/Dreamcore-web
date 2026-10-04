@@ -2,10 +2,11 @@ import React from 'react';
 import * as THREE from 'three';
 import { DoorCasing, SixPanelDoorMesh } from './SharedDoors';
 
-export const Doors = () => {
+export const Doors = (props) => {
 
   return (
-    <group position={[0, 0, -5.99]}>
+    <group {...props}>
+      <group position={[0, 0, -5.99]}>
       {/* Left Door (Closed) */}
       <group position={[-1.2, 0, 0]}>
         <DoorCasing />
