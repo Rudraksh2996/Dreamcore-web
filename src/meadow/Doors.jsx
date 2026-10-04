@@ -1,17 +1,15 @@
 import React from 'react';
 import * as THREE from 'three';
 import { DoorCasing, SixPanelDoorMesh } from './SharedDoors';
+import { PoolroomPortalDoor } from './PoolroomPortalDoor';
 
 export const Doors = (props) => {
 
   return (
     <group {...props}>
       <group position={[0, 0, -5.99]}>
-      {/* Left Door (Closed) */}
-      <group position={[-1.2, 0, 0]}>
-        <DoorCasing />
-        <SixPanelDoorMesh />
-      </group>
+      {/* Left Door (Transitions to Poolroom) */}
+      <PoolroomPortalDoor position={[-1.2, 0, 0]} />
 
       {/* Right Door (Open to void) */}
       <group position={[1.2, 0, 0]}>

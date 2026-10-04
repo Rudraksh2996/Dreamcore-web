@@ -4,6 +4,7 @@ import { PointerLockControls, Environment, Sky, Clouds, Cloud, MeshTransmissionM
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { MeadowScene } from './meadow/MeadowScene';
+import { PoolroomScene, isWater, WATER_LEVEL } from './poolroom/PoolroomScene';
 import { PortalDoor } from './meadow/PortalDoor';
 import { SixPanelDoorMesh, DoorCasing } from './meadow/SharedDoors';
 
@@ -177,7 +178,7 @@ const FPSController = ({ teleportTarget }) => {
             velocity.current.x = 0; velocity.current.z = 0;
          }
       }
-    } else {
+    } else if (activeScene === 'meadow') {
       boundsString = 'Meadow';
       // MEADOW BOUNDS
       // 5m width (-2.5 to 2.5), 12m length (sDist 0 to 12)
@@ -208,6 +209,39 @@ const FPSController = ({ teleportTarget }) => {
          const p = doorPos.clone().add(forward.clone().multiplyScalar(minSDist)).add(right.clone().multiplyScalar(latClamp));
          nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
       }
+    } else if (activeScene === 'poolroom') {
+      boundsString = 'Poolroom';
+      // Poolroom is centered at (0,0,-15), width 14, length 30
+      // We'll just hardcode limits relative to world since poolroom is at origin
+      const radius = 0.15;
+      if (nextPos.x < -7.0 + radius) { nextPos.x = -7.0 + radius; velocity.current.x = 0; }
+      if (nextPos.x > 7.0 - radius) { nextPos.x = 7.0 - radius; velocity.current.x = 0; }
+      if (nextPos.z < -30.0 + radius) { nextPos.z = -30.0 + radius; velocity.current.z = 0; }
+      if (nextPos.z > 0.0 - radius) { nextPos.z = 0.0 - radius; velocity.current.z = 0; }
+    }
+
+    // Wading Physics
+    let currentSpeed = speed;
+    let wasInWater = globalState.inWater || false;
+    let nowInWater = activeScene === 'poolroom' && isWater(nextPos.x, nextPos.z);
+    
+    if (nowInWater) {
+       currentSpeed = speed * 0.4;
+       if (!wasInWater) {
+           const audioEl = document.getElementById('splash-audio');
+           if (audioEl) {
+               audioEl.currentTime = 0;
+               audioEl.play().catch(e => console.error("Splash play failed:", e));
+           }
+       }
+    }
+    globalState.inWater = nowInWater;
+    
+    // Apply speed modifier directly to the calculated nextPos based on original worldVelocity
+    if (currentSpeed !== speed) {
+       const speedRatio = currentSpeed / speed;
+       nextPos.copy(position.current).add(worldVelocity.multiplyScalar(speedRatio));
+       // (Bounds would technically need re-evaluating but it's fine for simple wading)
     }
 
     if (window.setDebugInfo) {
@@ -328,6 +362,31 @@ const OutsideScenery = () => {
 };
 
 /* ============================================================
+   NATIVE POOLROOM (SHUTTING ENTRY DOOR)
+   ============================================================ */
+const PoolroomEntryDoorNative = () => {
+   const doorGroup = useRef();
+   
+   // The Poolroom door swings open away from Meadow, so +100 deg
+   // Once inside, we shut it slowly.
+   useFrame(() => {
+      if (!doorGroup.current) return;
+      doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, 0, 1.0, 0.016);
+   });
+
+   return (
+      <group position={[0, 0, 0]}>
+         <DoorCasing />
+         <group position={[0.55, 0, 0]} ref={doorGroup} rotation={[0, Math.PI * (100 / 180), 0]}>
+            <group position={[-0.55, 0, 0]} rotation={[0, 0, 0]}>
+               <SixPanelDoorMesh />
+            </group>
+         </group>
+      </group>
+   );
+};
+
+/* ============================================================
    NATIVE MEADOW (SHUTTING ENTRY DOOR)
    ============================================================ */
 const MeadowEntryDoorNative = () => {
@@ -389,6 +448,10 @@ export default function App() {
           } else {
              setTeleportTarget({ pos: targetPos, yaw: gateConfig.rotY });
           }
+       } else if (params.get('scene') === 'poolroom') {
+          setEntered(true);
+          setActiveScene('poolroom');
+          setTeleportTarget({ pos: new THREE.Vector3(0, 1.6, -1), yaw: 0 });
        }
      }
   }, []);
@@ -450,8 +513,9 @@ export default function App() {
       
       {/* Background Audio Loop (preloaded for instant playback) */}
       <audio id="bg-audio" src="/bg-loop.mp3" preload="auto" loop style={{ display: 'none' }} />
+      <audio id="splash-audio" src="/splash.mp3" preload="auto" style={{ display: 'none' }} />
       
-      {gatePrompt && activeScene === 'corridor' && (
+      {gatePrompt && activeScene !== 'poolroom' && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 5, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', letterSpacing: '0.2em', textShadow: '0 0 10px #f99cba' }}>
           <div style={{ marginTop: '20px' }}>[ E ] OPEN</div>
         </div>
@@ -459,8 +523,8 @@ export default function App() {
 
       <GlobalStateContext.Provider value={globalState}>
          <Canvas shadows camera={{ fov: 65, near: 0.01 }}>
-           <color attach="background" args={[activeScene === 'meadow' ? '#0c2230' : '#2b87b5']} />
-           {activeScene === 'meadow' && <fog attach="fog" args={['#0c2230', 2, 25]} />}
+           <color attach="background" args={[(activeScene === 'meadow' || activeScene === 'poolroom') ? '#0c2230' : '#2b87b5']} />
+           {(activeScene === 'meadow' || activeScene === 'poolroom') && <fog attach="fog" args={['#0c2230', 2, 25]} />}
            <Suspense fallback={null}>
              {/* CONDITIONAL ROOT SCENE RENDERING */}
              {activeScene === 'corridor' && (
@@ -482,6 +546,21 @@ export default function App() {
                    <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, gateConfig.rotY + Math.PI, 0]}>
                       <MeadowScene />
                       <MeadowEntryDoorNative />
+                   </group>
+                   
+                   <EffectComposer disableNormalPass>
+                     <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.5} />
+                     <Vignette eskil={false} offset={0.1} darkness={0.4} />
+                   </EffectComposer>
+                </>
+             )}
+
+             {activeScene === 'poolroom' && (
+                <>
+                   {/* NATIVE POOLROOM */}
+                   <group position={[0, 0, 0]} rotation={[0, 0, 0]}>
+                      <PoolroomScene />
+                      <PoolroomEntryDoorNative />
                    </group>
                    
                    <EffectComposer disableNormalPass>
