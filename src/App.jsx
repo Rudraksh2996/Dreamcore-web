@@ -211,19 +211,20 @@ const FPSController = ({ teleportTarget }) => {
       }
     } else if (activeScene === 'poolroom') {
       boundsString = 'Poolroom';
-      // Poolroom is centered at (0,0,-15), width 14, length 30
-      // We'll just hardcode limits relative to world since poolroom is at origin
+      // Poolroom native is at [gateConfig.x - 1.2, 0, gateConfig.z - 11.99]
+      const px = gateConfig.x - 1.2;
+      const pz = gateConfig.z - 11.99;
       const radius = 0.15;
-      if (nextPos.x < -7.0 + radius) { nextPos.x = -7.0 + radius; velocity.current.x = 0; }
-      if (nextPos.x > 7.0 - radius) { nextPos.x = 7.0 - radius; velocity.current.x = 0; }
-      if (nextPos.z < -30.0 + radius) { nextPos.z = -30.0 + radius; velocity.current.z = 0; }
-      if (nextPos.z > 0.0 - radius) { nextPos.z = 0.0 - radius; velocity.current.z = 0; }
+      if (nextPos.x < px - 7.0 + radius) { nextPos.x = px - 7.0 + radius; velocity.current.x = 0; }
+      if (nextPos.x > px + 7.0 - radius) { nextPos.x = px + 7.0 - radius; velocity.current.x = 0; }
+      if (nextPos.z < pz - 30.0 + radius) { nextPos.z = pz - 30.0 + radius; velocity.current.z = 0; }
+      if (nextPos.z > pz + 0.0 - radius) { nextPos.z = pz + 0.0 - radius; velocity.current.z = 0; }
     }
 
     // Wading Physics
     let currentSpeed = speed;
     let wasInWater = globalState.inWater || false;
-    let nowInWater = activeScene === 'poolroom' && isWater(nextPos.x, nextPos.z);
+    let nowInWater = activeScene === 'poolroom' && isWater(nextPos.x - (gateConfig.x - 1.2), nextPos.z - (gateConfig.z - 11.99));
     
     if (nowInWater) {
        currentSpeed = speed * 0.4;
@@ -558,7 +559,7 @@ export default function App() {
              {activeScene === 'poolroom' && (
                 <>
                    {/* NATIVE POOLROOM */}
-                   <group position={[0, 0, 0]} rotation={[0, 0, 0]}>
+                   <group position={[gateConfig.x - 1.2, 0, gateConfig.z - 11.99]} rotation={[0, 0, 0]}>
                       <PoolroomScene />
                       <PoolroomEntryDoorNative />
                    </group>

@@ -17,14 +17,16 @@ export const PoolroomPortalDoor = ({ position, rotation }) => {
 
   const doorPos = useMemo(() => new THREE.Vector3(...(position || [0,0,0])), [position]);
 
+  const rootGroup = useRef();
+
   const worldPos = useRef(new THREE.Vector3());
   const forward = useRef(new THREE.Vector3());
 
   useFrame(() => {
-     if (!doorGroup.current) return;
+     if (!rootGroup.current) return;
      
-     doorGroup.current.getWorldPosition(worldPos.current);
-     doorGroup.current.getWorldDirection(forward.current); 
+     rootGroup.current.getWorldPosition(worldPos.current);
+     rootGroup.current.getWorldDirection(forward.current); 
      
      const dist = camera.position.distanceTo(worldPos.current);
      
@@ -80,7 +82,7 @@ export const PoolroomPortalDoor = ({ position, rotation }) => {
   }, [setGatePrompt]);
 
   return (
-    <group position={position} rotation={rotation}>
+    <group position={position} rotation={rotation} ref={rootGroup}>
        <DoorCasing />
        
        {!isOpen && (
