@@ -59,5 +59,6 @@ export const Doors = (props) => {
         </mesh>
       </group>
     </group>
+    </group>
   );
 };
