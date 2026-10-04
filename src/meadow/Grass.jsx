@@ -4,7 +4,7 @@ import * as THREE from 'three';
 
 const CHUNK_SIZE = 2; // 2x2 meter chunks
 const GRASS_DENSITY = 10000; // 10,000 per sq meter
-const MEADOW_WIDTH = 5.0; // width of playable path room
+const MEADOW_WIDTH = 7.0; // wall to wall width (room is 7m wide)
 const MEADOW_LENGTH = 12.0;
 
 // Convert sRGB hex to linear float array for shaders
@@ -32,31 +32,45 @@ const GrassChunk = ({ cx, cz, geom, mat }) => {
     const phases = new Float32Array(count);
     const attributes = new Float32Array(count * 4); // [leanYaw, heightScale, strawJitter, isEdge]
     
-    let added = 0;
-    const maxAttempts = count * 3;
+    // Calculate grid dimensions for uniform distribution
+    const w = maxX - minX;
+    const l = maxZ - minZ;
+    const aspect = w / l;
+    const gridRows = Math.round(Math.sqrt(count / aspect));
+    const gridCols = Math.round(count / gridRows);
     
-    for (let attempts = 0; attempts < maxAttempts && added < count; attempts++) {
-      const x = minX + Math.random() * (maxX - minX);
-      const z = minZ + Math.random() * (maxZ - minZ);
-      
-      const pathX = Math.sin((z) * 0.5) * 1.2;
-      const distToPath = Math.abs(x - pathX);
-      
-      // SDF masking: path is ~1.4m wide (0.7m radius)
-      if (distToPath < 0.7) continue; 
-      
-      // Clear 3cm from walls
-      if (Math.abs(x) > (MEADOW_WIDTH / 2) - 0.03) continue;
-      
-      const isEdge = distToPath < 0.85;
-      
-      // Length 9 to 14cm (base geometry is 10cm, so scale 0.9 to 1.4)
-      let heightScale = 0.9 + Math.random() * 0.5;
-      if (Math.random() > 0.5) heightScale = 1.0 + Math.random() * 0.2; // bias towards 11cm
-      
-      if (isEdge) {
-         heightScale *= 1.2; // Taller at edge, leans over path
-      }
+    const cellW = w / gridCols;
+    const cellL = l / gridRows;
+
+    let added = 0;
+    
+    for (let r = 0; r < gridRows; r++) {
+      for (let c = 0; c < gridCols; c++) {
+        if (added >= count) break;
+        
+        // Jittered grid position
+        const x = minX + c * cellW + Math.random() * cellW;
+        const z = minZ + r * cellL + Math.random() * cellL;
+        
+        const pathX = Math.sin((z) * 0.5) * 1.2;
+        const distToPath = Math.abs(x - pathX);
+        
+        // The path is ~1.4m wide (0.7m radius). Clear exactly that width.
+        // Add a tiny 0.02m margin so blades don't spawn directly on the texture edge.
+        if (distToPath < 0.72) continue; 
+        
+        // Clear 3cm from outer walls to avoid clipping through the 7m bounds
+        if (Math.abs(x) > (MEADOW_WIDTH / 2) - 0.03) continue;
+        
+        const isEdge = distToPath < 0.85;
+        
+        // Length 9 to 14cm (base geometry is 10cm, so scale 0.9 to 1.4)
+        let heightScale = 0.9 + Math.random() * 0.5;
+        if (Math.random() > 0.5) heightScale = 1.0 + Math.random() * 0.2; // bias towards 11cm
+        
+        if (isEdge) {
+           heightScale *= 1.2; // Taller at edge, leans over path
+        }
       
       dummy.position.set(x, 0, z);
       
@@ -76,6 +90,7 @@ const GrassChunk = ({ cx, cz, geom, mat }) => {
       attributes[added * 4 + 3] = isEdge ? 1.0 : 0.0;
       
       added++;
+      }
     }
     
     meshRef.current.count = added;
