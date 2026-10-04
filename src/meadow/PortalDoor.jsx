@@ -28,7 +28,7 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
      
      const lookDir = new THREE.Vector3();
      camera.getWorldDirection(lookDir);
-     const toGate = doorPos.clone().sub(camera.position).normalize();
+     const toGate = doorPos.clone().add(new THREE.Vector3(0, 1.05, 0)).sub(camera.position).normalize();
      const isLooking = lookDir.dot(toGate) > 0.7;
      const inRange = dist < 3.5;
      
@@ -39,7 +39,7 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
      }
 
      if (isOpen && doorGroup.current) {
-        doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, -Math.PI * (100 / 180), 4, 0.016);
+        doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, Math.PI * (100 / 180), 4, 0.016);
      }
      
      let blendVal = 0.0;
@@ -77,52 +77,54 @@ export const PortalDoor = ({ cyanTiles, gateConfig }) => {
     };
   }, [setGatePrompt]);
 
-  const leftWidth = 2.525;
-  const rightWidth = 2.525;
+  const leftWidth = 2.45;
+  const rightWidth = 2.45;
   const lintelHeight = 5.9; // 8.0 - 2.1
 
-  // The portal mesh is just the doorway hole (0.95 x 2.1)
+  // The portal mesh is just the doorway hole (1.1 x 2.1)
   return (
     <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, gateConfig.rotY, 0]}>
        {/* Wall Pieces - Corridor Side (Cyan) */}
-       <mesh position={[-0.475 - leftWidth/2, 4.0, 0.075]}><boxGeometry args={[leftWidth, 8.0, 0.15]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
-       <mesh position={[0.475 + rightWidth/2, 4.0, 0.075]}><boxGeometry args={[rightWidth, 8.0, 0.15]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
-       <mesh position={[0, 2.1 + lintelHeight/2, 0.075]}><boxGeometry args={[0.95, lintelHeight, 0.15]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
+       <mesh position={[-0.55 - leftWidth/2, 4.0, 0.075]}><boxGeometry args={[leftWidth, 8.0, 0.15]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
+       <mesh position={[0.55 + rightWidth/2, 4.0, 0.075]}><boxGeometry args={[rightWidth, 8.0, 0.15]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
+       <mesh position={[0, 2.1 + lintelHeight/2, 0.075]}><boxGeometry args={[1.1, lintelHeight, 0.15]}/><meshPhysicalMaterial {...cyanTiles} /></mesh>
        
        {/* Corridor-side Casing */}
        <DoorCasing />
        
-       <pointLight position={[0, 2, 2]} intensity={2.0} color="#ffffff" distance={10} decay={2} />
+       <pointLight position={[0, 2, -2]} intensity={2.0} color="#ffffff" distance={10} decay={2} />
 
        {/* If closed, show a fake solid door to avoid rendering the heavy Meadow portal */}
        {!isOpen && (
-         <group position={[0.475, 0, 0]}>
-           <group position={[-0.475, 0, 0]} rotation={[0, Math.PI, 0]}>
+         <group position={[0.55, 0, 0]}>
+           <group position={[-0.55, 0, 0]} rotation={[0, Math.PI, 0]}>
              <SixPanelDoorMesh />
            </group>
          </group>
        )}
 
        {/* The Portal (always mounted, but hidden if far away and closed) */}
-       <mesh position={[0, 1.05, 0]} visible={isOpen || camera.position.distanceTo(doorPos) <= 45}>
-         <planeGeometry args={[0.95, 2.1]} />
-         <MeshPortalMaterial ref={portalRef} blend={0.0} worldUnits={true} side={THREE.DoubleSide} resolution={window.devicePixelRatio || 1}>
-           <color attach="background" args={['#0c2230']} />
-           <fog attach="fog" args={['#0c2230', 2, 25]} />
-           {/* INSIDE THE PORTAL: Isolated Meadow Scene */}
-           {/* The portal mesh is at Y=1.05. We offset by Y=-1.05 so the Meadow's origin is flush with the floor. */}
-           <group position={[0, -1.05, 0]}>
-              <MeadowScene />
-              
-              {/* Meadow-side Door Leaf and Casing (rendered inside portal so it can swing into it) */}
-              <group position={[0.475, 0, 0]} ref={doorGroup}>
-                <group position={[-0.475, 0, 0]} rotation={[0, Math.PI, 0]}>
-                  <SixPanelDoorMesh />
+       <group rotation={[0, Math.PI, 0]}>
+         <mesh position={[0, 1.05, 0]} visible={isOpen || camera.position.distanceTo(doorPos) <= 45}>
+           <planeGeometry args={[1.1, 2.1]} />
+           <MeshPortalMaterial ref={portalRef} blend={0.0} worldUnits={true} side={THREE.DoubleSide} resolution={window.devicePixelRatio || 1}>
+             <color attach="background" args={['#0c2230']} />
+             <fog attach="fog" args={['#0c2230', 2, 25]} />
+             {/* INSIDE THE PORTAL: Isolated Meadow Scene */}
+             {/* The portal mesh is at Y=1.05. We offset by Y=-1.05 so the Meadow's origin is flush with the floor. */}
+             <group position={[0, -1.05, 0]}>
+                <MeadowScene />
+                
+                {/* Meadow-side Door Leaf and Casing (rendered inside portal so it can swing into it) */}
+                <group position={[-0.55, 0, 0]} ref={doorGroup}>
+                  <group position={[0.55, 0, 0]} rotation={[0, 0, 0]}>
+                    <SixPanelDoorMesh />
+                  </group>
                 </group>
-              </group>
-           </group>
-         </MeshPortalMaterial>
-       </mesh>
+             </group>
+           </MeshPortalMaterial>
+         </mesh>
+       </group>
     </group>
   );
 };

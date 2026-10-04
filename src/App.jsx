@@ -77,7 +77,8 @@ const FPSController = ({ teleportTarget }) => {
   const moveState = useRef({ forward: false, backward: false, left: false, right: false });
   const velocity = useRef(new THREE.Vector3());
   const position = useRef(new THREE.Vector3(4.75, 1.6, -2)); 
-  const { activeScene, setPlayerMeadowLocalZ } = useGlobalState();
+  const globalState = useGlobalState();
+  const activeScene = globalState.activeScene;
 
   useEffect(() => {
     camera.rotation.order = 'YXZ';
@@ -136,7 +137,6 @@ const FPSController = ({ teleportTarget }) => {
     const nextPos = position.current.clone().add(worldVelocity);
 
     const sDist = signedDistance(nextPos);
-    setPlayerMeadowLocalZ(sDist);
 
     let boundsString = 'None';
     if (activeScene === 'corridor') {
@@ -148,62 +148,70 @@ const FPSController = ({ teleportTarget }) => {
       if (nextPos.x > maxX) { nextPos.x = maxX; velocity.current.x = 0; }
       if (nextPos.z > -1) { nextPos.z = -1; velocity.current.z = 0; }
       
-        // Portal Door bounds: block walking past the door plane UNLESS within the opening
-        if (sDist > -0.2) {
-           boundsString = 'Corridor + Door Block';
-           const lat = signedLateral(nextPos);
-           const radius = 0.2; // 0.4m diameter
-           if (lat < -0.475 + radius || lat > 0.475 - radius) {
-              boundsString = 'Doorway Side Wall';
-              // Push back to corridor side
-              const safeLat = THREE.MathUtils.clamp(lat, -0.475 + radius, 0.475 - radius);
-              const pushLat = doorPos.clone().add(right.clone().multiplyScalar(safeLat));
-              nextPos.x = pushLat.x + forward.x * -0.2;
-              nextPos.z = pushLat.z + forward.z * -0.2;
-              velocity.current.x = 0; velocity.current.z = 0;
-           } else if (!globalState?.doorOpen && sDist > 0.0) {
-              boundsString = 'Closed Door Leaf';
-              const pushLat = doorPos.clone().add(right.clone().multiplyScalar(lat));
-              nextPos.x = pushLat.x + forward.x * -0.05;
-              nextPos.z = pushLat.z + forward.z * -0.05;
-              velocity.current.x = 0; velocity.current.z = 0;
-           }
-        }
-      } else {
+      let lat = signedLateral(nextPos);
+      
+      // Funnel assist when door is open and player is close
+      if (globalState.doorOpen && sDist > -1.5 && sDist < 0.5) {
+         lat = THREE.MathUtils.damp(lat, 0, 3, dt);
+         const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(lat));
+         nextPos.x = p.x; nextPos.z = p.z;
+         boundsString = 'Doorway Funnel';
+      }
+
+      // Portal Door bounds: block walking past the door plane UNLESS within the opening
+      if (sDist > -0.2) {
+         const radius = 0.15; // 0.3m diameter, doorway is 1.1m wide
+         if (lat < -0.55 + radius || lat > 0.55 - radius) {
+            boundsString = 'Doorway Side Wall';
+            // Push back to corridor side
+            const safeLat = THREE.MathUtils.clamp(lat, -0.55 + radius, 0.55 - radius);
+            const pushLat = doorPos.clone().add(right.clone().multiplyScalar(safeLat));
+            nextPos.x = pushLat.x + forward.x * -0.2;
+            nextPos.z = pushLat.z + forward.z * -0.2;
+            velocity.current.x = 0; velocity.current.z = 0;
+         } else if (!globalState.doorOpen && sDist > 0.0) {
+            boundsString = 'Closed Door Leaf';
+            const pushLat = doorPos.clone().add(right.clone().multiplyScalar(lat));
+            nextPos.x = pushLat.x + forward.x * -0.05;
+            nextPos.z = pushLat.z + forward.z * -0.05;
+            velocity.current.x = 0; velocity.current.z = 0;
+         }
+      }
+    } else {
       boundsString = 'Meadow';
       // MEADOW BOUNDS
       // 5m width (-2.5 to 2.5), 12m length (sDist 0 to 12)
       const lat = signedLateral(nextPos);
-      const radius = 0.2;
-      if (lat < -2.3) { 
-         const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(-2.3));
+      const radius = 0.15;
+      if (lat < -2.35) { 
+         const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(-2.35));
          nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
       }
-      if (lat > 2.3) { 
-         const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(2.3));
+      if (lat > 2.35) { 
+         const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(2.35));
          nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
       }
-      if (sDist > 11.8) { 
-         const p = doorPos.clone().add(forward.clone().multiplyScalar(11.8)).add(right.clone().multiplyScalar(lat));
+      if (sDist > 11.85) { 
+         const p = doorPos.clone().add(forward.clone().multiplyScalar(11.85)).add(right.clone().multiplyScalar(lat));
          nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
       }
       
-      if (sDist > 2.5 && globalState?.doorOpen) {
-         if (globalState?.setDoorOpen) globalState.setDoorOpen(false);
+      if (sDist > 2.5 && globalState.doorOpen) {
+         globalState.setDoorOpen(false);
       }
       
       // Door closes behind player at sDist > 2.0. Prevent walking back into it.
       // But while crossing (door is open), allow them to stand in the doorway (down to sDist = -0.2)
-      const minSDist = globalState?.doorOpen ? -0.2 : 0.05;
+      const minSDist = globalState.doorOpen ? -0.2 : 0.05;
       if (sDist < minSDist) {
-         const latClamp = globalState?.doorOpen ? THREE.MathUtils.clamp(lat, -0.475 + radius, 0.475 - radius) : lat;
+         const latClamp = globalState.doorOpen ? THREE.MathUtils.clamp(lat, -0.55 + radius, 0.55 - radius) : lat;
          const p = doorPos.clone().add(forward.clone().multiplyScalar(minSDist)).add(right.clone().multiplyScalar(latClamp));
          nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
       }
     }
 
     if (window.setDebugInfo) {
-       window.setDebugInfo({ x: nextPos.x, z: nextPos.z, sDist, bounds: boundsString });
+       window.setDebugInfo({ x: nextPos.x, z: nextPos.z, sDist, lat: signedLateral(nextPos), bounds: boundsString, activeScene });
     }
 
     position.current.copy(nextPos);
@@ -326,6 +334,12 @@ const MeadowEntryDoorNative = () => {
    const doorGroup = useRef();
    const { doorOpen } = useGlobalState();
    
+   useEffect(() => {
+      if (doorOpen && doorGroup.current) {
+         doorGroup.current.rotation.y = Math.PI * (100 / 180);
+      }
+   }, []);
+
    // We spawn into meadow natively. The door is wide open (-100 deg) if doorOpen is true.
    // Once player sDist > 2.5, FPSController sets doorOpen to false, and we swing it shut slowly (to 0 deg).
    useFrame(() => {
@@ -334,7 +348,7 @@ const MeadowEntryDoorNative = () => {
          doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, 0, 1.5, 0.016);
       } else {
          // Keep swinging open or holding open
-         doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, -Math.PI * (100 / 180), 4, 0.016);
+         doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, Math.PI * (100 / 180), 4, 0.016);
       }
    });
 
@@ -342,8 +356,8 @@ const MeadowEntryDoorNative = () => {
       <group position={[0, 0, 0]}>
          {/* The wall itself is rendered by MeadowScene, we just need the casing and door */}
          <DoorCasing />
-         <group position={[0.475, 0, 0]} ref={doorGroup}>
-            <group position={[-0.475, 0, 0]} rotation={[0, Math.PI, 0]}>
+         <group position={[-0.55, 0, 0]} ref={doorGroup}>
+            <group position={[0.55, 0, 0]} rotation={[0, 0, 0]}>
                <SixPanelDoorMesh />
             </group>
          </group>
@@ -406,8 +420,9 @@ export default function App() {
     <div style={{ width: '100vw', height: '100vh', background: '#000', overflow: 'hidden' }}>
       {import.meta.env.DEV && (
          <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 100, color: 'lime', fontFamily: 'monospace', fontSize: 12, pointerEvents: 'none', background: 'rgba(0,0,0,0.5)', padding: 10 }}>
-            <div>Active Scene: {activeScene}</div>
+            <div>Active Scene: {debugInfo.activeScene || activeScene}</div>
             <div>Signed Dist: {debugInfo.sDist?.toFixed(2)}</div>
+            <div>Lateral Offset: {debugInfo.lat?.toFixed(2)}</div>
             <div>Pos X: {debugInfo.x?.toFixed(2)} Z: {debugInfo.z?.toFixed(2)}</div>
             <div>Active Bounds: {debugInfo.bounds}</div>
             {doorDebug && (
@@ -464,7 +479,7 @@ export default function App() {
              {activeScene === 'meadow' && (
                 <>
                    {/* NATIVE MEADOW (No double tonemapping, perfectly crisp) */}
-                   <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, gateConfig.rotY, 0]}>
+                   <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, gateConfig.rotY + Math.PI, 0]}>
                       <MeadowScene />
                       <MeadowEntryDoorNative />
                    </group>
