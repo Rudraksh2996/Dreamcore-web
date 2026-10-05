@@ -4,7 +4,8 @@ import { PointerLockControls, Environment, Sky, Clouds, Cloud, MeshTransmissionM
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { MeadowScene } from './meadow/MeadowScene';
-import { PoolroomScene, isWater, WATER_LEVEL } from './poolroom/PoolroomScene';
+import { PoolroomScene } from './poolroom/PoolroomScene';
+import { getShorelineZ, WATER_LEVEL, POOLROOM_BG, POOLROOM_FOG } from './poolroom/Constants';
 import { PortalDoor } from './meadow/PortalDoor';
 import { SixPanelDoorMesh, DoorCasing } from './meadow/SharedDoors';
 
@@ -224,7 +225,9 @@ const FPSController = ({ teleportTarget }) => {
     // Wading Physics
     let currentSpeed = speed;
     let wasInWater = globalState.inWater || false;
-    let nowInWater = activeScene === 'poolroom' && isWater(nextPos.x - (gateConfig.x - 1.2), nextPos.z - (gateConfig.z - 11.99));
+    let localX = nextPos.x - (gateConfig.x - 1.2);
+    let localZ = nextPos.z - (gateConfig.z - 11.99);
+    let nowInWater = activeScene === 'poolroom' && (localZ < getShorelineZ(localX));
     
     if (nowInWater) {
        currentSpeed = speed * 0.4;
@@ -453,7 +456,14 @@ export default function App() {
        } else if (params.get('scene') === 'poolroom') {
           setEntered(true);
           setActiveScene('poolroom');
-          setTeleportTarget({ pos: new THREE.Vector3(gateConfig.x - 1.2, 1.6, gateConfig.z - 12.99), yaw: 0 });
+          if (params.get('cam') === 'ref') {
+             // entrance corner, eye 1.6 m, looking along the room
+             // Room starts at z=0, goes to z=-30 (local). Width is -7 to 7.
+             // Entrance is near z=-1.
+             setTeleportTarget({ pos: new THREE.Vector3(gateConfig.x - 1.2 + 5.0, 1.6, gateConfig.z - 11.99 - 1.5), yaw: 0.1 });
+          } else {
+             setTeleportTarget({ pos: new THREE.Vector3(gateConfig.x - 1.2, 1.6, gateConfig.z - 12.99), yaw: 0 });
+          }
        }
      }
   }, []);
@@ -526,8 +536,9 @@ export default function App() {
 
       <GlobalStateContext.Provider value={globalState}>
          <Canvas shadows camera={{ fov: 65, near: 0.01 }}>
-           <color attach="background" args={[(activeScene === 'meadow' || activeScene === 'poolroom') ? '#0c2230' : '#2b87b5']} />
-           {(activeScene === 'meadow' || activeScene === 'poolroom') && <fog attach="fog" args={['#0c2230', 2, 25]} />}
+           <color attach="background" args={[activeScene === 'poolroom' ? POOLROOM_BG : (activeScene === 'meadow' ? '#0c2230' : '#2b87b5')]} />
+           {activeScene === 'meadow' && <fog attach="fog" args={['#0c2230', 2, 25]} />}
+           {activeScene === 'poolroom' && <fog attach="fog" args={[POOLROOM_FOG.color, POOLROOM_FOG.near, POOLROOM_FOG.far]} />}
            <Suspense fallback={null}>
              {/* CONDITIONAL ROOT SCENE RENDERING */}
              {activeScene === 'corridor' && (
@@ -567,8 +578,8 @@ export default function App() {
                    </group>
                    
                    <EffectComposer disableNormalPass>
-                     <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.5} />
-                     <Vignette eskil={false} offset={0.1} darkness={0.4} />
+                     <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.35} />
+                     <Vignette eskil={false} offset={0.1} darkness={0.2} />
                    </EffectComposer>
                 </>
              )}

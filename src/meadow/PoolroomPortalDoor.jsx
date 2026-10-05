@@ -6,6 +6,8 @@ import { DoorCasing, SixPanelDoorMesh } from './SharedDoors';
 import { PoolroomScene } from '../poolroom/PoolroomScene';
 import { useGlobalState } from '../App';
 
+import { POOLROOM_BG, POOLROOM_FOG } from '../poolroom/Constants';
+
 export const PoolroomPortalDoor = ({ position, rotation }) => {
   const { camera } = useThree();
   const doorGroup = useRef();
@@ -96,8 +98,8 @@ export const PoolroomPortalDoor = ({ position, rotation }) => {
          <mesh position={[0, 1.05, 0]}>
            <planeGeometry args={[1.1, 2.1]} />
            <MeshPortalMaterial ref={portalRef} blend={0.0} worldUnits={true} side={THREE.DoubleSide} resolution={window.devicePixelRatio || 1}>
-             <color attach="background" args={['#0c2230']} />
-             <fog attach="fog" args={['#0c2230', 2, 25]} />
+             <color attach="background" args={[POOLROOM_BG]} />
+             <fog attach="fog" args={[POOLROOM_FOG.color, POOLROOM_FOG.near, POOLROOM_FOG.far]} />
              
              {/* Inside Poolroom */}
              <group position={[0, -1.05, 0]}>
