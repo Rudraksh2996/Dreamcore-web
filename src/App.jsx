@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect, Suspense, createContext, useContext } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { PointerLockControls, Environment, Sky, Clouds, Cloud, MeshTransmissionMaterial, Html } from '@react-three/drei';
+import { PointerLockControls, Environment, Sky, Clouds, Cloud, MeshTransmissionMaterial, Html, Loader, PerformanceMonitor } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { MeadowScene } from './meadow/MeadowScene';
@@ -121,6 +121,14 @@ const FPSController = ({ teleportTarget }) => {
     const speed = 6.0;
     const damping = 8.0;
 
+    if (window.__lookDelta && (window.__lookDelta.x !== 0 || window.__lookDelta.y !== 0)) {
+       camera.rotation.y -= window.__lookDelta.x;
+       camera.rotation.x -= window.__lookDelta.y;
+       camera.rotation.x = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, camera.rotation.x));
+       window.__lookDelta.x = 0;
+       window.__lookDelta.y = 0;
+    }
+
     velocity.current.x -= velocity.current.x * damping * dt;
     velocity.current.z -= velocity.current.z * damping * dt;
 
@@ -133,6 +141,11 @@ const FPSController = ({ teleportTarget }) => {
 
     if (moveState.current.forward || moveState.current.backward) velocity.current.z += direction.z * speed * dt;
     if (moveState.current.left || moveState.current.right) velocity.current.x += direction.x * speed * dt;
+    
+    if (window.__joystick) {
+       velocity.current.x += window.__joystick.x * speed * dt;
+       velocity.current.z += window.__joystick.y * speed * dt;
+    }
 
     const camEuler = new THREE.Euler(0, camera.rotation.y, 0);
     const worldVelocity = velocity.current.clone().applyEuler(camEuler);
@@ -475,10 +488,128 @@ export default function App() {
      poolroomDoorOpen, setPoolroomDoorOpen,
      playerMeadowLocalZ, setPlayerMeadowLocalZ
   };
+  
+const MobileControls = () => {
+  const stickRef = useRef(null);
+  const baseRef = useRef(null);
+  
+  useEffect(() => {
+    window.__joystick = { x: 0, y: 0 };
+    window.__lookDelta = { x: 0, y: 0 };
+    
+    let activePointers = {};
+    
+    const onPointerDown = (e) => {
+       activePointers[e.pointerId] = { startX: e.clientX, startY: e.clientY, type: e.clientX < window.innerWidth / 2 ? 'move' : 'look', lastX: e.clientX, lastY: e.clientY };
+    };
+    
+    const onPointerMove = (e) => {
+       const ptr = activePointers[e.pointerId];
+       if (!ptr) return;
+       if (ptr.type === 'move') {
+          const dx = e.clientX - ptr.startX;
+          const dy = e.clientY - ptr.startY;
+          const maxDist = 50;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          const angle = Math.atan2(dy, dx);
+          
+          const clampedDist = Math.min(dist, maxDist);
+          const outX = Math.cos(angle) * clampedDist;
+          const outY = Math.sin(angle) * clampedDist;
+          
+          if (stickRef.current) stickRef.current.style.transform = `translate(${outX}px, ${outY}px)`;
+          if (baseRef.current) {
+             baseRef.current.style.opacity = '1';
+             baseRef.current.style.left = `${ptr.startX - 50}px`;
+             baseRef.current.style.top = `${ptr.startY - 50}px`;
+          }
+          
+          if (dist > 10) {
+             window.__joystick.x = outX / maxDist;
+             window.__joystick.y = outY / maxDist;
+          } else {
+             window.__joystick.x = 0;
+             window.__joystick.y = 0;
+          }
+       } else if (ptr.type === 'look') {
+          const dx = e.clientX - ptr.lastX;
+          const dy = e.clientY - ptr.lastY;
+          window.__lookDelta.x += dx * 0.005;
+          window.__lookDelta.y += dy * 0.005;
+          ptr.lastX = e.clientX;
+          ptr.lastY = e.clientY;
+       }
+    };
+    
+    const onPointerUp = (e) => {
+       const ptr = activePointers[e.pointerId];
+       if (ptr && ptr.type === 'move') {
+          window.__joystick.x = 0;
+          window.__joystick.y = 0;
+          if (stickRef.current) stickRef.current.style.transform = `translate(0px, 0px)`;
+          if (baseRef.current) baseRef.current.style.opacity = '0';
+       }
+       delete activePointers[e.pointerId];
+    };
+    
+    const overlay = document.getElementById('mobile-controls-overlay');
+    if (overlay) {
+       overlay.addEventListener('pointerdown', onPointerDown);
+       overlay.addEventListener('pointermove', onPointerMove);
+       overlay.addEventListener('pointerup', onPointerUp);
+       overlay.addEventListener('pointercancel', onPointerUp);
+    }
+    
+    return () => {
+       if (overlay) {
+          overlay.removeEventListener('pointerdown', onPointerDown);
+          overlay.removeEventListener('pointermove', onPointerMove);
+          overlay.removeEventListener('pointerup', onPointerUp);
+          overlay.removeEventListener('pointercancel', onPointerUp);
+       }
+    };
+  }, []);
+  
+  return (
+    <div id="mobile-controls-overlay" className="touch-layer" style={{ position: 'absolute', inset: 0, zIndex: 4 }}>
+       <div ref={baseRef} style={{ position: 'absolute', width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', border: '2px solid rgba(255,255,255,0.3)', opacity: 0, pointerEvents: 'none', transition: 'opacity 0.2s' }}>
+          <div ref={stickRef} style={{ position: 'absolute', width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.5)', top: 30, left: 30 }} />
+       </div>
+    </div>
+  );
+};
 
   const [debugInfo, setDebugInfo] = useState({});
   const [doorDebug, setDoorDebug] = useState(null);
   const [showWireframes, setShowWireframes] = useState(false);
+  
+  const [isTouch, setIsTouch] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
+  const [dpr, setDpr] = useState(1.5); // Fallback until monitor kicks in
+
+  useEffect(() => {
+    if (window.matchMedia('(pointer: coarse)').matches) {
+       setIsTouch(true);
+    }
+    const onTouch = () => setIsTouch(true);
+    window.addEventListener('touchstart', onTouch, { once: true });
+    
+    const onVisibilityChange = () => {
+       const visible = document.visibilityState === 'visible';
+       setIsVisible(visible);
+       const audioEl = document.getElementById('bg-audio');
+       if (audioEl && window.__audioStarted) {
+          if (visible) audioEl.play().catch(() => {});
+          else audioEl.pause();
+       }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    
+    return () => {
+       window.removeEventListener('touchstart', onTouch);
+       document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []);
   
   useEffect(() => {
      if (import.meta.env.DEV) {
@@ -493,7 +624,8 @@ export default function App() {
   }, []);
 
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#000', overflow: 'hidden' }}>
+    <div className="touch-layer" style={{ width: '100%', height: '100dvh', minHeight: '100vh', background: '#000', overflow: 'hidden', position: 'relative' }}>
+      <div className="portrait-warning">Rotate device for the best experience</div>
       {import.meta.env.DEV && (
          <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 100, color: 'lime', fontFamily: 'monospace', fontSize: 12, pointerEvents: 'none', background: 'rgba(0,0,0,0.5)', padding: 10 }}>
             <div>Active Scene: {debugInfo.activeScene || activeScene}</div>
@@ -517,10 +649,11 @@ export default function App() {
       {!entered && (
         <div onClick={() => {
            setEntered(true);
+           window.__audioStarted = true;
            const audioEl = document.getElementById('bg-audio');
            if (audioEl) audioEl.play().catch(e => console.error("Audio play failed:", e));
-        }} style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, #5ab8d2 0%, #f99cba 100%)', cursor: 'pointer', color: '#fff', letterSpacing: '0.4em', fontSize: '15px' }}>
-          CLICK TO ENTER THE DREAM
+        }} style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, #5ab8d2 0%, #f99cba 100%)', cursor: 'pointer', color: '#fff', letterSpacing: '0.4em', fontSize: 'clamp(14px, 3vw, 24px)', textAlign: 'center', padding: '20px' }}>
+          {isTouch ? "TAP TO ENTER" : "CLICK TO ENTER THE DREAM"}
         </div>
       )}
       
@@ -528,14 +661,26 @@ export default function App() {
       <audio id="bg-audio" src="/bg-loop.mp3" preload="auto" loop style={{ display: 'none' }} />
       <audio id="splash-audio" src="/splash.mp3" preload="auto" style={{ display: 'none' }} />
       
+      {isTouch && entered && <MobileControls />}
+      
       {gatePrompt && activeScene !== 'poolroom' && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 5, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', letterSpacing: '0.2em', textShadow: '0 0 10px #f99cba' }}>
-          <div style={{ marginTop: '20px' }}>[ E ] OPEN</div>
+          {isTouch ? (
+             <div onClick={() => {
+                const ev = new KeyboardEvent('keydown', { code: 'KeyE' });
+                window.dispatchEvent(ev);
+             }} style={{ pointerEvents: 'auto', marginTop: '40px', background: 'rgba(255,255,255,0.2)', border: '1px solid #fff', borderRadius: '22px', padding: '12px 24px', fontSize: '16px', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)', cursor: 'pointer' }}>
+                OPEN
+             </div>
+          ) : (
+             <div style={{ marginTop: '20px' }}>[ E ] OPEN</div>
+          )}
         </div>
       )}
 
       <GlobalStateContext.Provider value={globalState}>
-         <Canvas shadows camera={{ fov: 65, near: 0.01 }}>
+         <Canvas shadows camera={{ fov: 65, near: 0.01 }} dpr={dpr}>
+           <PerformanceMonitor onIncline={() => setDpr(isTouch ? 1.5 : 2)} onDecline={() => setDpr(1)} flipflops={3} onFallback={() => setDpr(1)} />
            <color attach="background" args={[activeScene === 'poolroom' ? POOLROOM_BG : (activeScene === 'meadow' ? '#0c2230' : '#2b87b5')]} />
            {activeScene === 'meadow' && <fog attach="fog" args={['#0c2230', 2, 25]} />}
            {activeScene === 'poolroom' && <fog attach="fog" args={[POOLROOM_FOG.color, POOLROOM_FOG.near, POOLROOM_FOG.far]} />}
@@ -548,7 +693,7 @@ export default function App() {
                   <OutsideScenery />
                   
                   <EffectComposer disableNormalPass>
-                    <Bloom luminanceThreshold={0.75} mipmapBlur intensity={0.2} />
+                    {!isTouch && <Bloom luminanceThreshold={0.75} mipmapBlur intensity={0.2} />}
                     <Vignette eskil={false} offset={0.1} darkness={0.5} />
                   </EffectComposer>
                 </>
@@ -563,7 +708,7 @@ export default function App() {
                    </group>
                    
                    <EffectComposer disableNormalPass>
-                     <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.5} />
+                     {!isTouch && <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.5} />}
                      <Vignette eskil={false} offset={0.1} darkness={0.4} />
                    </EffectComposer>
                 </>
@@ -578,7 +723,7 @@ export default function App() {
                    </group>
                    
                    <EffectComposer disableNormalPass>
-                     <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.35} />
+                     {!isTouch && <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.35} />}
                      <Vignette eskil={false} offset={0.1} darkness={0.2} />
                    </EffectComposer>
                 </>
@@ -586,13 +731,14 @@ export default function App() {
              
              {entered && (
                <>
-                 <PointerLockControls />
+                 {!isTouch && isVisible && <PointerLockControls />}
                  <FPSController teleportTarget={teleportTarget} />
                </>
              )}
            </Suspense>
          </Canvas>
       </GlobalStateContext.Provider>
+      <Loader />
     </div>
   );
 }
