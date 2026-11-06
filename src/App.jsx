@@ -75,7 +75,7 @@ function FPSController({ scene, setScene, open, enabled, spawn, touch, locked })
   }, [camera, enabled, touch, locked]);
   useFrame((_, delta) => {
     if (!enabled) { velocity.current.set(0, 0, 0); return; }
-    const dt = Math.min(delta, 0.04);
+    const frameTime = Math.min(delta, 0.1);
     const look = window.__lookDelta;
     if (look) {
       camera.rotation.y -= look.x; camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - look.y, -1.48, 1.48);
@@ -89,10 +89,16 @@ function FPSController({ scene, setScene, open, enabled, spawn, touch, locked })
     const wading = scene === 'poolroom' && local.z + 12 < getShorelineZ(local.x + 1.2);
     const speed = (wading ? 1.7 : k.has('ShiftLeft') || k.has('ShiftRight') ? 5.2 : 3.2) * 1.3;
     direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), camera.rotation.y).multiplyScalar(speed);
-    velocity.current.lerp(direction, 1 - Math.exp(-12 * dt));
-    const position = camera.position.clone().addScaledVector(velocity.current, dt);
-    const nextScene = constrainMovement(position, scene, open);
-    camera.position.copy(position);
+    // Small collision steps retain real-time speed on slower devices without tunneling.
+    const steps = Math.max(1, Math.ceil(frameTime / (1 / 60)));
+    const dt = frameTime / steps;
+    let nextScene = scene;
+    for (let step = 0; step < steps; step++) {
+      velocity.current.lerp(direction, 1 - Math.exp(-12 * dt));
+      const position = camera.position.clone().addScaledVector(velocity.current, dt);
+      nextScene = constrainMovement(position, nextScene, open);
+      camera.position.copy(position);
+    }
     if (nextScene !== scene) setScene(nextScene);
   });
   return null;
@@ -224,7 +230,7 @@ const OutsideScenery = () => {
   clouds.colorSpace = THREE.SRGBColorSpace;
   return (
     <group>
-      <mesh position={[0, 0, -70]} renderOrder={-1}>
+      <mesh position={[0, 0, -70]} rotation={[0, Math.PI, 0]} renderOrder={-1}>
         <sphereGeometry args={[300, 48, 24]} />
         <meshBasicMaterial map={clouds} side={THREE.BackSide} depthWrite={false} fog={false} />
       </mesh>
@@ -232,6 +238,34 @@ const OutsideScenery = () => {
     </group>
   );
 };
+
+function ResponsiveCamera() {
+  const { camera, size } = useThree();
+  useEffect(() => {
+    const aspect = size.width / Math.max(1, size.height);
+    camera.fov = aspect < 0.85 ? 85 : aspect > 2 ? Math.max(50, THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(55)) / aspect))) : 68;
+    camera.updateProjectionMatrix();
+  }, [camera, size.width, size.height]);
+  return null;
+}
+
+function useScreenSize() {
+  const [screen, setScreen] = useState(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio || 1 }));
+  useEffect(() => {
+    let request;
+    const update = () => {
+      cancelAnimationFrame(request);
+      request = requestAnimationFrame(() => setScreen(current => {
+        const next = { width: innerWidth, height: innerHeight, dpr: devicePixelRatio || 1 };
+        return current.width === next.width && current.height === next.height && current.dpr === next.dpr ? current : next;
+      }));
+    };
+    window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
+    return () => { cancelAnimationFrame(request); window.removeEventListener('resize', update); window.visualViewport?.removeEventListener('resize', update); };
+  }, []);
+  return screen;
+}
 
 const sceneNames = { corridor: 'The Tidal Passage', meadow: 'The Sky Garden', poolroom: 'The Stillwater Hall' };
 const initialScene = import.meta.env.DEV ? new URLSearchParams(location.search).get('scene') : null;
@@ -243,17 +277,25 @@ export default function App() {
   const [scene, setScene] = useState(startScene);
   const [open, setOpen] = useState({ meadow: false, poolroom: false });
   const [prompt, setPrompt] = useState('');
-  const [touch] = useState(() => matchMedia('(pointer: coarse)').matches || (import.meta.env.DEV && new URLSearchParams(location.search).get('controls') === 'touch'));
+  const [touch, setTouch] = useState(() => matchMedia('(pointer: coarse)').matches || (import.meta.env.DEV && new URLSearchParams(location.search).get('controls') === 'touch'));
   const [locked, setLocked] = useState(false);
   const [paused, setPaused] = useState(false);
   const [visible, setVisible] = useState(true);
   const [quality, setQuality] = useState(touch ? 'balanced' : 'ultra');
-  const [autoDpr, setAutoDpr] = useState(touch ? 1.25 : 1.75);
+  const [renderScale, setRenderScale] = useState(1);
+  const screen = useScreenSize();
+  useEffect(() => {
+    const media = matchMedia('(pointer: coarse)');
+    const change = event => setTouch(event.matches || (import.meta.env.DEV && new URLSearchParams(location.search).get('controls') === 'touch'));
+    media.addEventListener('change', change);
+    return () => media.removeEventListener('change', change);
+  }, []);
   const [muted, setMuted] = useState(false);
   const spawn = useMemo(() => ({
-    position: startScene === 'meadow' ? (inspectCamera === 'exit' ? toWorld(-1.2, -11) : toWorld(0, -1.5)) : startScene === 'poolroom' ? toWorld(-1.2, -13.5) : inspectCamera === 'exit' ? toWorld(0, 1.5) : new THREE.Vector3(4.75, 1.6, -2),
-    yaw: (startScene === 'corridor' ? 0 : worldRotation) + (inspectCamera === 'back' ? Math.PI : 0),
+    position: startScene === 'meadow' ? (inspectCamera === 'exit' ? toWorld(-1.2, -11) : toWorld(0, -1.5)) : startScene === 'poolroom' ? toWorld(-1.2, -13.5) : inspectCamera === 'exit' ? toWorld(0, 1.5) : new THREE.Vector3(4.75, 1.6, inspectCamera === 'window' ? -140 / 24 : -2),
+    yaw: inspectCamera === 'window' && startScene === 'corridor' ? Math.PI / 2 : (startScene === 'corridor' ? 0 : worldRotation) + (inspectCamera === 'back' ? Math.PI : 0),
   }), []);
+  const cameraOptions = useMemo(() => ({ fov: 68, near: 0.05, far: 450, position: spawn.position.toArray() }), [spawn]);
   const canvasElement = useRef(), audio = useRef();
   useEffect(() => {
     let wasLocked = false;
@@ -275,7 +317,7 @@ export default function App() {
     if (audio.current) { audio.current.muted = muted; if (entered && visible) audio.current.play().catch(() => {}); else audio.current.pause(); }
   }, [entered, visible, muted]);
   const resume = () => {
-    setEntered(true); setPaused(false);
+    setEntered(true); setPaused(false); setRenderScale(1);
     if (!touch) {
       try { canvasElement.current?.requestPointerLock()?.catch(() => {}); } catch { /* Drag-to-look remains available. */ }
     }
@@ -284,11 +326,13 @@ export default function App() {
   const showCorridor = scene === 'corridor' || (open.meadow && (scene === 'meadow' || open.poolroom));
   const showMeadow = scene === 'meadow' || (scene === 'corridor' && open.meadow) || (scene === 'poolroom' && open.poolroom);
   const showPoolroom = scene === 'poolroom' || (showMeadow && open.poolroom);
-  const dpr = quality === 'ultra' ? Math.min(Math.max(devicePixelRatio || 1, 1.5), 2) : Math.min(autoDpr, 1.5);
+  const pixelBudget = touch ? (quality === 'ultra' ? 2200000 : 1500000) : quality === 'ultra' ? 4000000 : 2000000;
+  const dpr = Math.max(0.25, Math.min(screen.dpr, quality === 'ultra' ? 2 : 1.5, Math.sqrt(pixelBudget / Math.max(1, screen.width * screen.height))) * renderScale);
   return <main className="dream-world">
-    <Canvas onCreated={({ gl }) => { canvasElement.current = gl.domElement; }} shadows={THREE.PCFShadowMap} dpr={dpr} camera={{ fov: 68, near: 0.05, far: 450, position: spawn.position.toArray() }}
+    <Canvas onCreated={({ gl }) => { canvasElement.current = gl.domElement; }} shadows={THREE.PCFShadowMap} dpr={dpr} camera={cameraOptions}
       gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.NoToneMapping, toneMappingExposure: 1.1 }}>
-      <PerformanceMonitor onIncline={() => setAutoDpr(touch ? 1.25 : 1.5)} onDecline={() => setAutoDpr(1)} flipflops={3} onFallback={() => setAutoDpr(1)} />
+      {playing && <PerformanceMonitor onIncline={() => setRenderScale(scale => Math.min(1, scale + 0.1))} onDecline={() => setRenderScale(scale => Math.max(0.5, scale * 0.8))} flipflops={3} onFallback={() => setRenderScale(0.5)} />}
+      <ResponsiveCamera />
       <color attach="background" args={[scene === 'poolroom' ? POOLROOM_BG : '#7bb8d4']} />
       <fog attach="fog" args={[scene === 'poolroom' ? POOLROOM_FOG.color : '#9dcbd9', scene === 'poolroom' ? 15 : 45, scene === 'poolroom' ? 65 : 240]} />
       <Suspense fallback={null}>
@@ -303,8 +347,8 @@ export default function App() {
           {showPoolroom && <group position={[-1.2, 0, -12]}><PoolroomScene /></group>}
           <WorldDoors scene={scene} open={open} setOpen={setOpen} setPrompt={setPrompt} enabled={playing} />
         </group>
-        <EffectComposer multisampling={quality === 'ultra' ? 4 : 0}>
-          {quality === 'ultra' && <N8AO halfRes aoRadius={0.45} intensity={1.2} quality="performance" />}
+        <EffectComposer multisampling={quality === 'ultra' && renderScale >= 0.8 ? 4 : 0}>
+          {quality === 'ultra' && renderScale >= 0.8 && <N8AO halfRes aoRadius={0.45} intensity={1.2} quality="performance" />}
           <Bloom luminanceThreshold={1.1} mipmapBlur intensity={0.24} />
           <ToneMapping />
           <Vignette eskil={false} offset={0.25} darkness={0.22} />
@@ -317,12 +361,13 @@ export default function App() {
     <MobileControls enabled={touch && playing} />
     <div className="world-hud"><span className="wordmark">DREAMCORE<span> / </span>WANDER FREELY</span><span className="location">{sceneNames[scene]}</span></div>
     {playing && <><div className="crosshair" /><div className="travel-note">{!touch && !locked ? 'Drag to look · ' : ''}Every doorway leads both ways</div></>}
+    {playing && <button className="pause-button" aria-label="Pause game" onClick={() => { if (document.pointerLockElement) document.exitPointerLock(); setPaused(true); }}>Pause</button>}
     {playing && prompt && <button className="door-prompt" onClick={() => document.dispatchEvent(new Event('dream-interact'))}><kbd>{touch ? 'TAP' : 'E'}</kbd>{prompt}</button>}
     {(!entered || paused) && <div className="welcome">
       <div className="welcome-content"><p className="eyebrow">A PLACE BETWEEN PLACES</p><h1>Stay a little<br /><em>longer.</em></h1>
         <p className="intro">Follow the light. Find a doorway.<br />You can always find your way back.</p>
         <button id="resume-dream" className="enter-button" onClick={resume}>{entered ? 'Return to the dream' : 'Enter the dream'} <span>&#8599;</span></button>
-        <div className="settings"><label>Graphics <select value={quality} onChange={e => setQuality(e.target.value)}><option value="ultra">Ultra HD</option><option value="balanced">Balanced</option></select></label><button onClick={() => setMuted(value => !value)}>Sound {muted ? 'off' : 'on'}</button></div>
+        <div className="settings"><label>Graphics <select value={quality} onChange={e => { setQuality(e.target.value); setRenderScale(1); }}><option value="ultra">Ultra HD</option><option value="balanced">Balanced</option></select></label><button onClick={() => setMuted(value => !value)}>Sound {muted ? 'off' : 'on'}</button></div>
         <p className="controls-hint">{touch ? 'Left thumb to move / Right thumb to look / Tap to open doors' : 'WASD / Arrows to move / Mouse to look / E for doors / Shift to run / Esc to pause'}</p>
       </div><span className="welcome-index">01 — ∞<br />NO WRONG TURNS</span>
     </div>}
