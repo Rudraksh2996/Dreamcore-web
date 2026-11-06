@@ -1,7 +1,7 @@
 import React from 'react';
 import * as THREE from 'three';
 import { DoorCasing, SixPanelDoorMesh } from './SharedDoors';
-import { PoolroomPortalDoor } from './PoolroomPortalDoor';
+
 
 export const Doors = (props) => {
 
@@ -9,7 +9,7 @@ export const Doors = (props) => {
     <group {...props}>
       <group position={[0, 0, -5.99]}>
       {/* Left Door (Transitions to Poolroom) */}
-      <PoolroomPortalDoor position={[-1.2, 0, 0]} />
+
 
       {/* Right Door (Open to void) */}
       <group position={[1.2, 0, 0]}>
@@ -27,7 +27,7 @@ export const Doors = (props) => {
         </mesh>
 
         {/* Swung Door */}
-        <group position={[-0.475, 0, 0]} rotation={[0, -Math.PI / 1.7, 0]}>
+        <group position={[-0.475, 0, 0]} rotation={[0, 0, 0]}>
            <group position={[0.475, 0, 0]}>
              <SixPanelDoorMesh />
            </group>

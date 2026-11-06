@@ -92,8 +92,15 @@ export const MeadowScene = () => {
        {/* Walls (Standard Material for lighting response) */}
        <mesh position={[-3.5, 1.6, -6]} rotation={[0, Math.PI/2, 0]} receiveShadow><planeGeometry args={[12, 3.2]} /><meshStandardMaterial map={texLeft} roughness={0.9} /></mesh>
        <mesh position={[3.5, 1.6, -6]} rotation={[0, -Math.PI/2, 0]} receiveShadow><planeGeometry args={[12, 3.2]} /><meshStandardMaterial map={texRight} roughness={0.9} /></mesh>
-       <mesh position={[0, 1.6, -12]} receiveShadow><planeGeometry args={[7, 3.2]} /><meshStandardMaterial map={texFront} roughness={0.9} /></mesh>
-       <mesh position={[0, 1.6, 0]} rotation={[0, Math.PI, 0]} receiveShadow><planeGeometry args={[7, 3.2]} /><meshStandardMaterial map={texBack} roughness={0.9} /></mesh>
+       <group position={[0, 0, -12]}>
+         <mesh position={[-2.625, 1.6, 0]} receiveShadow><planeGeometry args={[1.75, 3.2]} /><meshStandardMaterial map={texFront} roughness={0.9} /></mesh>
+         <mesh position={[1.425, 1.6, 0]} receiveShadow><planeGeometry args={[4.15, 3.2]} /><meshStandardMaterial map={texFront} roughness={0.9} /></mesh>
+         <mesh position={[-1.2, 2.65, 0]} receiveShadow><planeGeometry args={[1.1, 1.1]} /><meshStandardMaterial map={texFront} roughness={0.9} /></mesh>
+       </group>
+       <group rotation={[0, Math.PI, 0]}>
+         {[-1, 1].map(side => <mesh key={side} position={[side * 2.025, 1.6, 0]} receiveShadow><planeGeometry args={[2.95, 3.2]} /><meshStandardMaterial map={texBack} roughness={0.9} /></mesh>)}
+         <mesh position={[0, 2.65, 0]} receiveShadow><planeGeometry args={[1.1, 1.1]} /><meshStandardMaterial map={texBack} roughness={0.9} /></mesh>
+       </group>
        
        {/* Ceiling */}
        <mesh position={[0, 3.2, -6]} rotation={[Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[7, 12]} /><meshStandardMaterial map={texCeil} roughness={1.0} /></mesh>

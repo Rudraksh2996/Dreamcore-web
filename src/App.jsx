@@ -1,44 +1,15 @@
-import React, { useMemo, useRef, useState, useEffect, Suspense, createContext, useContext } from 'react';
+import React, { useMemo, useRef, useState, useEffect, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { PointerLockControls, Environment, Sky, Clouds, Cloud, MeshTransmissionMaterial, Html, Loader, PerformanceMonitor } from '@react-three/drei';
+import { PointerLockControls, Environment, Lightformer, Sky, Clouds, Cloud, MeshTransmissionMaterial, Loader, PerformanceMonitor } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { MeadowScene } from './meadow/MeadowScene';
 import { PoolroomScene } from './poolroom/PoolroomScene';
-import { getShorelineZ, WATER_LEVEL, POOLROOM_BG, POOLROOM_FOG } from './poolroom/Constants';
-import { PortalDoor } from './meadow/PortalDoor';
-import { SixPanelDoorMesh, DoorCasing } from './meadow/SharedDoors';
+import { getShorelineZ, POOLROOM_BG, POOLROOM_FOG } from './poolroom/Constants';
+import { gateConfig, worldRotation, toLocal, toWorld, constrainMovement } from './world';
+import { WorldDoors } from './WorldDoors';
+import './App.css';
 
-const GlobalStateContext = createContext();
-export const useGlobalState = () => useContext(GlobalStateContext);
-
-import { getDoorFrame } from './meadow/DoorHelper';
-
-const gateConfig = {
-  z: -140,
-  x: Math.sin(-140 * 0.1) * 2.0 + 4.75,
-  rotY: Math.atan2(Math.cos(-140 * 0.1) * 0.2, -1)
-};
-const gateMatrix = new THREE.Matrix4().makeRotationY(gateConfig.rotY);
-gateMatrix.setPosition(gateConfig.x, 0, gateConfig.z);
-
-const { doorPos, forward, right, signedDistance, signedLateral } = getDoorFrame(gateConfig);
-
-// Dev assertions
-if (import.meta.env.DEV) {
-   const spawnDist = signedDistance(new THREE.Vector3(4.75, 1.6, -2));
-   if (spawnDist > -50) throw new Error("Assertion failed: Spawn is not sufficiently far on corridor side: " + spawnDist);
-   
-   const beforeDoor = doorPos.clone().add(forward.clone().multiplyScalar(-1.0));
-   if (signedDistance(beforeDoor) > 0) throw new Error("Assertion failed: Point before door is positive");
-   
-   const insideDoor = doorPos.clone().add(forward.clone().multiplyScalar(1.0));
-   if (signedDistance(insideDoor) < 0) throw new Error("Assertion failed: Point inside door is negative");
-}
-
-/* ============================================================
-   1. PROCEDURAL TILE TEXTURE GENERATOR
-   ============================================================ */
 function useTileMaterial(color, groutColor = '#e2eeef') {
   const tex = useMemo(() => {
     const canvas = document.createElement('canvas');
@@ -71,209 +42,77 @@ function useTileMaterial(color, groutColor = '#e2eeef') {
   return { map: tex, roughness: 0.22, metalness: 0.0, clearcoat: 0.35, clearcoatRoughness: 0.02 };
 }
 
-/* ============================================================
-   2. CUSTOM FPS CONTROLLER & PHYSICS
-   ============================================================ */
-const FPSController = ({ teleportTarget }) => {
-  const camera = useThree(state => state.camera);
-  const moveState = useRef({ forward: false, backward: false, left: false, right: false });
+function FPSController({ scene, setScene, open, enabled, spawn, touch }) {
+  const { camera } = useThree();
+  const keys = useRef(new Set());
   const velocity = useRef(new THREE.Vector3());
-  const position = useRef(new THREE.Vector3(4.75, 1.6, -2)); 
-  const globalState = useGlobalState();
-  const activeScene = globalState.activeScene;
-
   useEffect(() => {
+    camera.position.copy(spawn.position);
     camera.rotation.order = 'YXZ';
-    const onKeyDown = (e) => {
-      switch (e.code) {
-        case 'KeyW': moveState.current.forward = true; break;
-        case 'KeyS': moveState.current.backward = true; break;
-        case 'KeyA': moveState.current.left = true; break;
-        case 'KeyD': moveState.current.right = true; break;
-      }
-    };
-    const onKeyUp = (e) => {
-      switch (e.code) {
-        case 'KeyW': moveState.current.forward = false; break;
-        case 'KeyS': moveState.current.backward = false; break;
-        case 'KeyA': moveState.current.left = false; break;
-        case 'KeyD': moveState.current.right = false; break;
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('keyup', onKeyUp);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.removeEventListener('keyup', onKeyUp);
-    };
-  }, [camera]);
-
+    camera.rotation.set(spawn.pitch || 0, spawn.yaw, 0);
+    velocity.current.set(0, 0, 0);
+  }, [camera, spawn]);
   useEffect(() => {
-    if (teleportTarget) {
-      position.current.copy(teleportTarget.pos);
-      camera.rotation.set(teleportTarget.pitch || 0, teleportTarget.yaw, 0);
-      velocity.current.set(0, 0, 0);
-    }
-  }, [teleportTarget, camera]);
-
+    const down = event => keys.current.add(event.code);
+    const up = event => keys.current.delete(event.code);
+    const clear = () => { keys.current.clear(); velocity.current.set(0, 0, 0); };
+    document.addEventListener('keydown', down); document.addEventListener('keyup', up);
+    window.addEventListener('blur', clear); document.addEventListener('visibilitychange', clear); document.addEventListener('pointerlockchange', clear);
+    return () => {
+      document.removeEventListener('keydown', down); document.removeEventListener('keyup', up);
+      window.removeEventListener('blur', clear); document.removeEventListener('visibilitychange', clear); document.removeEventListener('pointerlockchange', clear);
+    };
+  }, []);
   useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.1); 
-    const speed = 6.0;
-    const damping = 8.0;
-
-    if (window.__lookDelta && (window.__lookDelta.x !== 0 || window.__lookDelta.y !== 0)) {
-       camera.rotation.y -= window.__lookDelta.x;
-       camera.rotation.x -= window.__lookDelta.y;
-       camera.rotation.x = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, camera.rotation.x));
-       window.__lookDelta.x = 0;
-       window.__lookDelta.y = 0;
+    if (!enabled || (!touch && !document.pointerLockElement)) { velocity.current.set(0, 0, 0); return; }
+    const dt = Math.min(delta, 0.04);
+    const look = window.__lookDelta;
+    if (look) {
+      camera.rotation.y -= look.x; camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - look.y, -1.48, 1.48);
+      look.x = look.y = 0;
     }
-
-    velocity.current.x -= velocity.current.x * damping * dt;
-    velocity.current.z -= velocity.current.z * damping * dt;
-
-    const direction = new THREE.Vector3();
-    if (moveState.current.forward) direction.z -= 1;
-    if (moveState.current.backward) direction.z += 1;
-    if (moveState.current.left) direction.x -= 1;
-    if (moveState.current.right) direction.x += 1;
-    if (direction.lengthSq() > 0) direction.normalize();
-
-    if (moveState.current.forward || moveState.current.backward) velocity.current.z += direction.z * speed * dt;
-    if (moveState.current.left || moveState.current.right) velocity.current.x += direction.x * speed * dt;
-    
-    if (window.__joystick) {
-       velocity.current.x += window.__joystick.x * speed * dt;
-       velocity.current.z += window.__joystick.y * speed * dt;
-    }
-
-    const camEuler = new THREE.Euler(0, camera.rotation.y, 0);
-    const worldVelocity = velocity.current.clone().applyEuler(camEuler);
-    const nextPos = position.current.clone().add(worldVelocity);
-
-    const sDist = signedDistance(nextPos);
-
-    let boundsString = 'None';
-    if (activeScene === 'corridor') {
-      boundsString = 'Corridor';
-      const z = nextPos.z;
-      const pathCenter = Math.sin(z * 0.1) * 2.0 + 4.75;
-      const minX = pathCenter - 1.8; const maxX = pathCenter + 1.8; 
-      if (nextPos.x < minX) { nextPos.x = minX; velocity.current.x = 0; }
-      if (nextPos.x > maxX) { nextPos.x = maxX; velocity.current.x = 0; }
-      if (nextPos.z > -1) { nextPos.z = -1; velocity.current.z = 0; }
-      
-      let lat = signedLateral(nextPos);
-      
-      // Funnel assist when door is open and player is close
-      if (globalState.doorOpen && sDist > -1.5 && sDist < 0.5) {
-         lat = THREE.MathUtils.damp(lat, 0, 3, dt);
-         const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(lat));
-         nextPos.x = p.x; nextPos.z = p.z;
-         boundsString = 'Doorway Funnel';
-      }
-
-      // Portal Door bounds: block walking past the door plane UNLESS within the opening
-      if (sDist > -0.2) {
-         const radius = 0.15; // 0.3m diameter, doorway is 1.1m wide
-         if (lat < -0.55 + radius || lat > 0.55 - radius) {
-            boundsString = 'Doorway Side Wall';
-            // Push back to corridor side
-            const safeLat = THREE.MathUtils.clamp(lat, -0.55 + radius, 0.55 - radius);
-            const pushLat = doorPos.clone().add(right.clone().multiplyScalar(safeLat));
-            nextPos.x = pushLat.x + forward.x * -0.2;
-            nextPos.z = pushLat.z + forward.z * -0.2;
-            velocity.current.x = 0; velocity.current.z = 0;
-         } else if (!globalState.doorOpen && sDist > 0.0) {
-            boundsString = 'Closed Door Leaf';
-            const pushLat = doorPos.clone().add(right.clone().multiplyScalar(lat));
-            nextPos.x = pushLat.x + forward.x * -0.05;
-            nextPos.z = pushLat.z + forward.z * -0.05;
-            velocity.current.x = 0; velocity.current.z = 0;
-         }
-      }
-    } else if (activeScene === 'meadow') {
-      boundsString = 'Meadow';
-      // MEADOW BOUNDS
-      // 5m width (-2.5 to 2.5), 12m length (sDist 0 to 12)
-      const lat = signedLateral(nextPos);
-      const radius = 0.15;
-      if (lat < -2.35) { 
-         const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(-2.35));
-         nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
-      }
-      if (lat > 2.35) { 
-         const p = doorPos.clone().add(forward.clone().multiplyScalar(sDist)).add(right.clone().multiplyScalar(2.35));
-         nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
-      }
-      if (sDist > 11.85 && !globalState.poolroomDoorOpen) { 
-         const p = doorPos.clone().add(forward.clone().multiplyScalar(11.85)).add(right.clone().multiplyScalar(lat));
-         nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
-      }
-      
-      if (sDist > 2.5 && globalState.doorOpen) {
-         globalState.setDoorOpen(false);
-      }
-      
-      // Door closes behind player at sDist > 2.0. Prevent walking back into it.
-      // But while crossing (door is open), allow them to stand in the doorway (down to sDist = -0.2)
-      const minSDist = globalState.doorOpen ? -0.2 : 0.05;
-      if (sDist < minSDist) {
-         const latClamp = globalState.doorOpen ? THREE.MathUtils.clamp(lat, -0.55 + radius, 0.55 - radius) : lat;
-         const p = doorPos.clone().add(forward.clone().multiplyScalar(minSDist)).add(right.clone().multiplyScalar(latClamp));
-         nextPos.x = p.x; nextPos.z = p.z; velocity.current.x = 0; velocity.current.z = 0; 
-      }
-    } else if (activeScene === 'poolroom') {
-      boundsString = 'Poolroom';
-      // Poolroom native is at [gateConfig.x - 1.2, 0, gateConfig.z - 11.99]
-      const px = gateConfig.x - 1.2;
-      const pz = gateConfig.z - 11.99;
-      const radius = 0.15;
-      if (nextPos.x < px - 7.0 + radius) { nextPos.x = px - 7.0 + radius; velocity.current.x = 0; }
-      if (nextPos.x > px + 7.0 - radius) { nextPos.x = px + 7.0 - radius; velocity.current.x = 0; }
-      if (nextPos.z < pz - 30.0 + radius) { nextPos.z = pz - 30.0 + radius; velocity.current.z = 0; }
-      if (nextPos.z > pz + 0.0 - radius) { nextPos.z = pz + 0.0 - radius; velocity.current.z = 0; }
-    }
-
-    // Wading Physics
-    let currentSpeed = speed;
-    let wasInWater = globalState.inWater || false;
-    let localX = nextPos.x - (gateConfig.x - 1.2);
-    let localZ = nextPos.z - (gateConfig.z - 11.99);
-    let nowInWater = activeScene === 'poolroom' && (localZ < getShorelineZ(localX));
-    
-    if (nowInWater) {
-       currentSpeed = speed * 0.4;
-       if (!wasInWater) {
-           const audioEl = document.getElementById('splash-audio');
-           if (audioEl) {
-               audioEl.currentTime = 0;
-               audioEl.play().catch(e => console.error("Splash play failed:", e));
-           }
-       }
-    }
-    globalState.inWater = nowInWater;
-    
-    // Apply speed modifier directly to the calculated nextPos based on original worldVelocity
-    if (currentSpeed !== speed) {
-       const speedRatio = currentSpeed / speed;
-       nextPos.copy(position.current).add(worldVelocity.multiplyScalar(speedRatio));
-       // (Bounds would technically need re-evaluating but it's fine for simple wading)
-    }
-
-    if (window.setDebugInfo) {
-       window.setDebugInfo({ x: nextPos.x, z: nextPos.z, sDist, lat: signedLateral(nextPos), bounds: boundsString, activeScene });
-    }
-
-    position.current.copy(nextPos);
-    camera.position.copy(position.current);
+    const k = keys.current, stick = window.__joystick || { x: 0, y: 0 };
+    const direction = new THREE.Vector3(Number(k.has('KeyD') || k.has('ArrowRight')) - Number(k.has('KeyA') || k.has('ArrowLeft')) + stick.x, 0,
+      Number(k.has('KeyS') || k.has('ArrowDown')) - Number(k.has('KeyW') || k.has('ArrowUp')) + stick.y);
+    if (direction.lengthSq() > 1) direction.normalize();
+    const local = toLocal(camera.position);
+    const wading = scene === 'poolroom' && local.z + 12 < getShorelineZ(local.x + 1.2);
+    const speed = wading ? 1.7 : k.has('ShiftLeft') || k.has('ShiftRight') ? 5.2 : 3.2;
+    direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), camera.rotation.y).multiplyScalar(speed);
+    velocity.current.lerp(direction, 1 - Math.exp(-12 * dt));
+    const position = camera.position.clone().addScaledVector(velocity.current, dt);
+    const nextScene = constrainMovement(position, scene, open);
+    camera.position.copy(position);
+    if (nextScene !== scene) setScene(nextScene);
   });
   return null;
-};
+}
 
-/* ============================================================
-   3. CORRIDOR GEOMETRY
-   ============================================================ */
+function MobileControls({ enabled }) {
+  const pointers = useRef(new Map());
+  const [stick, setStick] = useState(null);
+  useEffect(() => {
+    window.__joystick = { x: 0, y: 0 }; window.__lookDelta = { x: 0, y: 0 };
+    const reset = () => { pointers.current.clear(); window.__joystick = { x: 0, y: 0 }; setStick(null); };
+    window.addEventListener('blur', reset);
+    return () => { window.removeEventListener('blur', reset); reset(); };
+  }, []);
+  if (!enabled) return null;
+  return <div className="mobile-controls" aria-label="Touch movement and look controls"
+    onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, move: e.clientX < innerWidth / 2 }); }}
+    onPointerMove={e => {
+      const p = pointers.current.get(e.pointerId); if (!p) return;
+      if (p.move) {
+        const dx = e.clientX - p.x, dy = e.clientY - p.y, length = Math.max(50, Math.hypot(dx, dy));
+        window.__joystick = { x: dx / length, y: dy / length }; setStick({ x: p.x, y: p.y, dx: dx / length * 42, dy: dy / length * 42 });
+      } else { window.__lookDelta.x += (e.clientX - p.lastX) * 0.004; window.__lookDelta.y += (e.clientY - p.lastY) * 0.004; p.lastX = e.clientX; p.lastY = e.clientY; }
+    }}
+    onPointerUp={e => { if (pointers.current.get(e.pointerId)?.move) { window.__joystick = { x: 0, y: 0 }; setStick(null); } pointers.current.delete(e.pointerId); }}
+    onPointerCancel={e => { pointers.current.delete(e.pointerId); window.__joystick = { x: 0, y: 0 }; setStick(null); }}>
+    {stick && <div className="joystick" style={{ left: stick.x - 50, top: stick.y - 50 }}><span style={{ transform: `translate(${stick.dx}px, ${stick.dy}px)` }} /></div>}
+  </div>;
+}
+
 function applyWorldUVs(geom) {
   geom.computeVertexNormals();
   const pos = geom.attributes.position;
@@ -359,7 +198,10 @@ const WavyCorridor = () => {
         );
       })}
       
-      <PortalDoor cyanTiles={cyanTiles} gateConfig={gateConfig} />
+      <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, worldRotation, 0]}>
+        {[-1, 1].map(side => <mesh key={side} position={[side * 1.8, 4, 0]} receiveShadow><boxGeometry args={[2.5, 8, 0.12]} /><meshPhysicalMaterial {...cyanTiles} /></mesh>)}
+        <mesh position={[0, 5.05, 0]} receiveShadow><boxGeometry args={[1.1, 5.9, 0.12]} /><meshPhysicalMaterial {...cyanTiles} /></mesh>
+      </group>
     </group>
   );
 };
@@ -378,367 +220,79 @@ const OutsideScenery = () => {
   );
 };
 
-/* ============================================================
-   NATIVE POOLROOM (SHUTTING ENTRY DOOR)
-   ============================================================ */
-const PoolroomEntryDoorNative = () => {
-   const doorGroup = useRef();
-   
-   // The Poolroom door swings open away from Meadow, so +100 deg
-   // Once inside, we shut it slowly.
-   useFrame(() => {
-      if (!doorGroup.current) return;
-      doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, 0, 1.0, 0.016);
-   });
+const sceneNames = { corridor: 'The Tidal Passage', meadow: 'The Sky Garden', poolroom: 'The Stillwater Hall' };
+const initialScene = import.meta.env.DEV ? new URLSearchParams(location.search).get('scene') : null;
+const startScene = sceneNames[initialScene] ? initialScene : 'corridor';
 
-   return (
-      <group position={[0, 0, 0]}>
-         <DoorCasing />
-         <group position={[0.55, 0, 0]} ref={doorGroup} rotation={[0, Math.PI * (100 / 180), 0]}>
-            <group position={[-0.55, 0, 0]} rotation={[0, 0, 0]}>
-               <SixPanelDoorMesh />
-            </group>
-         </group>
-      </group>
-   );
-};
-
-/* ============================================================
-   NATIVE MEADOW (SHUTTING ENTRY DOOR)
-   ============================================================ */
-const MeadowEntryDoorNative = () => {
-   const doorGroup = useRef();
-   const { doorOpen } = useGlobalState();
-   
-   useEffect(() => {
-      if (doorOpen && doorGroup.current) {
-         doorGroup.current.rotation.y = Math.PI * (100 / 180);
-      }
-   }, []);
-
-   // We spawn into meadow natively. The door is wide open (-100 deg) if doorOpen is true.
-   // Once player sDist > 2.5, FPSController sets doorOpen to false, and we swing it shut slowly (to 0 deg).
-   useFrame(() => {
-      if (!doorGroup.current) return;
-      if (!doorOpen) {
-         doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, 0, 1.5, 0.016);
-      } else {
-         // Keep swinging open or holding open
-         doorGroup.current.rotation.y = THREE.MathUtils.damp(doorGroup.current.rotation.y, Math.PI * (100 / 180), 4, 0.016);
-      }
-   });
-
-   return (
-      <group position={[0, 0, 0]}>
-         {/* The wall itself is rendered by MeadowScene, we just need the casing and door */}
-         <DoorCasing />
-         <group position={[-0.55, 0, 0]} ref={doorGroup}>
-            <group position={[0.55, 0, 0]} rotation={[0, 0, 0]}>
-               <SixPanelDoorMesh />
-            </group>
-         </group>
-      </group>
-   );
-};
-
-/* ============================================================
-   6. MAIN APPLICATION
-   ============================================================ */
 export default function App() {
   const [entered, setEntered] = useState(false);
-  const [teleportTarget, setTeleportTarget] = useState(null);
-  const [gatePrompt, setGatePrompt] = useState(false);
-  const [doorOpen, setDoorOpen] = useState(false);
-  const [poolroomDoorOpen, setPoolroomDoorOpen] = useState(false);
-  const [activeScene, setActiveScene] = useState('corridor'); 
-  const [playerMeadowLocalZ, setPlayerMeadowLocalZ] = useState(140);
-  
+  const [scene, setScene] = useState(startScene);
+  const [open, setOpen] = useState({ meadow: false, poolroom: false });
+  const [prompt, setPrompt] = useState('');
+  const [touch] = useState(() => matchMedia('(pointer: coarse)').matches);
+  const [locked, setLocked] = useState(false);
+  const [visible, setVisible] = useState(true);
+  const [quality, setQuality] = useState(touch ? 'balanced' : 'ultra');
+  const [autoDpr, setAutoDpr] = useState(touch ? 1.25 : 1.75);
+  const [muted, setMuted] = useState(false);
+  const spawn = useMemo(() => ({
+    position: startScene === 'meadow' ? toWorld(0, -1) : startScene === 'poolroom' ? toWorld(-1.2, -13) : new THREE.Vector3(4.75, 1.6, -2),
+    yaw: startScene === 'corridor' ? 0 : worldRotation,
+  }), []);
+  const controls = useRef(), audio = useRef();
   useEffect(() => {
-     if (import.meta.env.DEV) {
-       const params = new URLSearchParams(window.location.search);
-       if (params.get('scene') === 'meadow') {
-          setEntered(true);
-          setActiveScene('meadow');
-          
-          const targetPos = new THREE.Vector3(0, 1.6, -1).applyMatrix4(gateMatrix);
-          if (params.get('cam') === 'ref') {
-             setTeleportTarget({ pos: targetPos, yaw: gateConfig.rotY, pitch: -0.1 });
-          } else {
-             setTeleportTarget({ pos: targetPos, yaw: gateConfig.rotY });
-          }
-       } else if (params.get('scene') === 'poolroom') {
-          setEntered(true);
-          setActiveScene('poolroom');
-          if (params.get('cam') === 'ref') {
-             // entrance corner, eye 1.6 m, looking along the room
-             // Room starts at z=0, goes to z=-30 (local). Width is -7 to 7.
-             // Entrance is near z=-1.
-             setTeleportTarget({ pos: new THREE.Vector3(gateConfig.x - 1.2 + 5.0, 1.6, gateConfig.z - 11.99 - 1.5), yaw: 0.1 });
-          } else {
-             setTeleportTarget({ pos: new THREE.Vector3(gateConfig.x - 1.2, 1.6, gateConfig.z - 12.99), yaw: 0 });
-          }
-       }
-     }
+    const update = () => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
   }, []);
-
-  const globalState = {
-     activeScene, setActiveScene,
-     gatePrompt, setGatePrompt,
-     doorOpen, setDoorOpen,
-     poolroomDoorOpen, setPoolroomDoorOpen,
-     playerMeadowLocalZ, setPlayerMeadowLocalZ
-  };
-  
-const MobileControls = () => {
-  const stickRef = useRef(null);
-  const baseRef = useRef(null);
-  
   useEffect(() => {
-    window.__joystick = { x: 0, y: 0 };
-    window.__lookDelta = { x: 0, y: 0 };
-    
-    let activePointers = {};
-    
-    const onPointerDown = (e) => {
-       activePointers[e.pointerId] = { startX: e.clientX, startY: e.clientY, type: e.clientX < window.innerWidth / 2 ? 'move' : 'look', lastX: e.clientX, lastY: e.clientY };
-    };
-    
-    const onPointerMove = (e) => {
-       const ptr = activePointers[e.pointerId];
-       if (!ptr) return;
-       if (ptr.type === 'move') {
-          const dx = e.clientX - ptr.startX;
-          const dy = e.clientY - ptr.startY;
-          const maxDist = 50;
-          const dist = Math.sqrt(dx*dx + dy*dy);
-          const angle = Math.atan2(dy, dx);
-          
-          const clampedDist = Math.min(dist, maxDist);
-          const outX = Math.cos(angle) * clampedDist;
-          const outY = Math.sin(angle) * clampedDist;
-          
-          if (stickRef.current) stickRef.current.style.transform = `translate(${outX}px, ${outY}px)`;
-          if (baseRef.current) {
-             baseRef.current.style.opacity = '1';
-             baseRef.current.style.left = `${ptr.startX - 50}px`;
-             baseRef.current.style.top = `${ptr.startY - 50}px`;
-          }
-          
-          if (dist > 10) {
-             window.__joystick.x = outX / maxDist;
-             window.__joystick.y = outY / maxDist;
-          } else {
-             window.__joystick.x = 0;
-             window.__joystick.y = 0;
-          }
-       } else if (ptr.type === 'look') {
-          const dx = e.clientX - ptr.lastX;
-          const dy = e.clientY - ptr.lastY;
-          window.__lookDelta.x += dx * 0.005;
-          window.__lookDelta.y += dy * 0.005;
-          ptr.lastX = e.clientX;
-          ptr.lastY = e.clientY;
-       }
-    };
-    
-    const onPointerUp = (e) => {
-       const ptr = activePointers[e.pointerId];
-       if (ptr && ptr.type === 'move') {
-          window.__joystick.x = 0;
-          window.__joystick.y = 0;
-          if (stickRef.current) stickRef.current.style.transform = `translate(0px, 0px)`;
-          if (baseRef.current) baseRef.current.style.opacity = '0';
-       }
-       delete activePointers[e.pointerId];
-    };
-    
-    const overlay = document.getElementById('mobile-controls-overlay');
-    if (overlay) {
-       overlay.addEventListener('pointerdown', onPointerDown);
-       overlay.addEventListener('pointermove', onPointerMove);
-       overlay.addEventListener('pointerup', onPointerUp);
-       overlay.addEventListener('pointercancel', onPointerUp);
-    }
-    
-    return () => {
-       if (overlay) {
-          overlay.removeEventListener('pointerdown', onPointerDown);
-          overlay.removeEventListener('pointermove', onPointerMove);
-          overlay.removeEventListener('pointerup', onPointerUp);
-          overlay.removeEventListener('pointercancel', onPointerUp);
-       }
-    };
-  }, []);
-  
-  return (
-    <div id="mobile-controls-overlay" className="touch-layer" style={{ position: 'absolute', inset: 0, zIndex: 4 }}>
-       <div ref={baseRef} style={{ position: 'absolute', width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', border: '2px solid rgba(255,255,255,0.3)', opacity: 0, pointerEvents: 'none', transition: 'opacity 0.2s' }}>
-          <div ref={stickRef} style={{ position: 'absolute', width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.5)', top: 30, left: 30 }} />
-       </div>
-    </div>
-  );
-};
-
-  const [debugInfo, setDebugInfo] = useState({});
-  const [doorDebug, setDoorDebug] = useState(null);
-  const [showWireframes, setShowWireframes] = useState(false);
-  
-  const [isTouch, setIsTouch] = useState(false);
-  const [isVisible, setIsVisible] = useState(true);
-  const [dpr, setDpr] = useState(1.5); // Fallback until monitor kicks in
-
-  useEffect(() => {
-    if (window.matchMedia('(pointer: coarse)').matches) {
-       setIsTouch(true);
-    }
-    const onTouch = () => setIsTouch(true);
-    window.addEventListener('touchstart', onTouch, { once: true });
-    
-    const onVisibilityChange = () => {
-       const visible = document.visibilityState === 'visible';
-       setIsVisible(visible);
-       const audioEl = document.getElementById('bg-audio');
-       if (audioEl && window.__audioStarted) {
-          if (visible) audioEl.play().catch(() => {});
-          else audioEl.pause();
-       }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    
-    return () => {
-       window.removeEventListener('touchstart', onTouch);
-       document.removeEventListener('visibilitychange', onVisibilityChange);
-    };
-  }, []);
-  
-  useEffect(() => {
-     if (import.meta.env.DEV) {
-        const onKey = (e) => { if (e.code === 'KeyK') setShowWireframes(s => !s); };
-        window.addEventListener('keydown', onKey);
-        
-        window.setDebugInfo = setDebugInfo;
-        window.setDoorDebug = setDoorDebug;
-        
-        return () => window.removeEventListener('keydown', onKey);
-     }
-  }, []);
-
-  return (
-    <div className="touch-layer" style={{ width: '100%', height: '100dvh', minHeight: '100vh', background: '#000', overflow: 'hidden', position: 'relative' }}>
-      <div className="portrait-warning">Rotate device for the best experience</div>
-      {import.meta.env.DEV && (
-         <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 100, color: 'lime', fontFamily: 'monospace', fontSize: 12, pointerEvents: 'none', background: 'rgba(0,0,0,0.5)', padding: 10 }}>
-            <div>Active Scene: {debugInfo.activeScene || activeScene}</div>
-            <div>Signed Dist: {debugInfo.sDist?.toFixed(2)}</div>
-            <div>Lateral Offset: {debugInfo.lat?.toFixed(2)}</div>
-            <div>Pos X: {debugInfo.x?.toFixed(2)} Z: {debugInfo.z?.toFixed(2)}</div>
-            <div>Active Bounds: {debugInfo.bounds}</div>
-            {doorDebug && (
-               <>
-                 <div>Door Dist: {doorDebug.dist?.toFixed(2)}</div>
-                 <div>Ray hits door: {doorDebug.isLooking ? 'yes' : 'no'}</div>
-                 <div>In range: {doorDebug.inRange ? 'yes' : 'no'}</div>
-                 <div>Door state: {doorDebug.isOpen ? 'open' : 'closed'}</div>
-                 <div>Portal blend: {doorDebug.blend?.toFixed(2)}</div>
-                 <div>Meadow renders: {doorDebug.meadowRenders ? 'yes' : 'no'}</div>
-               </>
-            )}
-            <div>Wireframes (K): {showWireframes ? 'ON' : 'OFF'}</div>
-         </div>
-      )}
-      {!entered && (
-        <div onClick={() => {
-           setEntered(true);
-           window.__audioStarted = true;
-           const audioEl = document.getElementById('bg-audio');
-           if (audioEl) audioEl.play().catch(e => console.error("Audio play failed:", e));
-        }} style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, #5ab8d2 0%, #f99cba 100%)', cursor: 'pointer', color: '#fff', letterSpacing: '0.4em', fontSize: 'clamp(14px, 3vw, 24px)', textAlign: 'center', padding: '20px' }}>
-          {isTouch ? "TAP TO ENTER" : "CLICK TO ENTER THE DREAM"}
-        </div>
-      )}
-      
-      {/* Background Audio Loop (preloaded for instant playback) */}
-      <audio id="bg-audio" src="/bg-loop.mp3" preload="auto" loop style={{ display: 'none' }} />
-      <audio id="splash-audio" src="/splash.mp3" preload="auto" style={{ display: 'none' }} />
-      
-      {isTouch && entered && <MobileControls />}
-      
-      {gatePrompt && activeScene !== 'poolroom' && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 5, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', letterSpacing: '0.2em', textShadow: '0 0 10px #f99cba' }}>
-          {isTouch ? (
-             <div onClick={() => {
-                const ev = new KeyboardEvent('keydown', { code: 'KeyE' });
-                window.dispatchEvent(ev);
-             }} style={{ pointerEvents: 'auto', marginTop: '40px', background: 'rgba(255,255,255,0.2)', border: '1px solid #fff', borderRadius: '22px', padding: '12px 24px', fontSize: '16px', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)', cursor: 'pointer' }}>
-                OPEN
-             </div>
-          ) : (
-             <div style={{ marginTop: '20px' }}>[ E ] OPEN</div>
-          )}
-        </div>
-      )}
-
-      <GlobalStateContext.Provider value={globalState}>
-         <Canvas shadows camera={{ fov: 65, near: 0.01 }} dpr={dpr}>
-           <PerformanceMonitor onIncline={() => setDpr(isTouch ? 1.5 : 2)} onDecline={() => setDpr(1)} flipflops={3} onFallback={() => setDpr(1)} />
-           <color attach="background" args={[activeScene === 'poolroom' ? POOLROOM_BG : (activeScene === 'meadow' ? '#0c2230' : '#2b87b5')]} />
-           {activeScene === 'meadow' && <fog attach="fog" args={['#0c2230', 2, 25]} />}
-           {activeScene === 'poolroom' && <fog attach="fog" args={[POOLROOM_FOG.color, POOLROOM_FOG.near, POOLROOM_FOG.far]} />}
-           <Suspense fallback={null}>
-             {/* CONDITIONAL ROOT SCENE RENDERING */}
-             {activeScene === 'corridor' && (
-                <>
-                  <Environment preset="city" background={false} blur={0.1} />
-                  <WavyCorridor />
-                  <OutsideScenery />
-                  
-                  <EffectComposer disableNormalPass>
-                    {!isTouch && <Bloom luminanceThreshold={0.75} mipmapBlur intensity={0.2} />}
-                    <Vignette eskil={false} offset={0.1} darkness={0.5} />
-                  </EffectComposer>
-                </>
-             )}
-             
-             {activeScene === 'meadow' && (
-                <>
-                   {/* NATIVE MEADOW (No double tonemapping, perfectly crisp) */}
-                   <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, gateConfig.rotY + Math.PI, 0]}>
-                      <MeadowScene />
-                      <MeadowEntryDoorNative />
-                   </group>
-                   
-                   <EffectComposer disableNormalPass>
-                     {!isTouch && <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.5} />}
-                     <Vignette eskil={false} offset={0.1} darkness={0.4} />
-                   </EffectComposer>
-                </>
-             )}
-
-             {activeScene === 'poolroom' && (
-                <>
-                   {/* NATIVE POOLROOM */}
-                   <group position={[gateConfig.x - 1.2, 0, gateConfig.z - 11.99]} rotation={[0, 0, 0]}>
-                      <PoolroomScene />
-                      <PoolroomEntryDoorNative />
-                   </group>
-                   
-                   <EffectComposer disableNormalPass>
-                     {!isTouch && <Bloom luminanceThreshold={0.9} mipmapBlur intensity={0.35} />}
-                     <Vignette eskil={false} offset={0.1} darkness={0.2} />
-                   </EffectComposer>
-                </>
-             )}
-             
-             {entered && (
-               <>
-                 {!isTouch && isVisible && <PointerLockControls />}
-                 <FPSController teleportTarget={teleportTarget} />
-               </>
-             )}
-           </Suspense>
-         </Canvas>
-      </GlobalStateContext.Provider>
-      <Loader />
-    </div>
-  );
+    if (audio.current) { audio.current.muted = muted; if (entered && visible) audio.current.play().catch(() => {}); else audio.current.pause(); }
+  }, [entered, visible, muted]);
+  const resume = () => { setEntered(true); if (!touch) controls.current?.lock(); };
+  const playing = entered && visible && (touch || locked);
+  const showCorridor = scene === 'corridor' || (scene === 'meadow' && open.meadow);
+  const showMeadow = scene === 'meadow' || (scene === 'corridor' && open.meadow) || (scene === 'poolroom' && open.poolroom);
+  const showPoolroom = scene === 'poolroom' || (showMeadow && open.poolroom);
+  const dpr = quality === 'ultra' ? Math.min(Math.max(devicePixelRatio || 1, 1.5), 2) : Math.min(autoDpr, 1.5);
+  return <main className="dream-world">
+    <Canvas shadows dpr={dpr} camera={{ fov: 68, near: 0.05, far: 450, position: spawn.position.toArray() }}
+      gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}>
+      <PerformanceMonitor onIncline={() => setAutoDpr(touch ? 1.25 : 1.5)} onDecline={() => setAutoDpr(1)} flipflops={3} onFallback={() => setAutoDpr(1)} />
+      <color attach="background" args={[scene === 'poolroom' ? POOLROOM_BG : '#7bb8d4']} />
+      <fog attach="fog" args={[scene === 'poolroom' ? POOLROOM_FOG.color : '#9dcbd9', scene === 'poolroom' ? 15 : 45, scene === 'poolroom' ? 65 : 240]} />
+      <Suspense fallback={null}>
+        <Environment resolution={256}>
+          <Lightformer position={[0, 10, 0]} rotation={[Math.PI / 2, 0, 0]} scale={[20, 20, 1]} intensity={2} color="#fff1d8" />
+          <Lightformer position={[-10, 3, 0]} rotation={[0, Math.PI / 2, 0]} scale={[15, 8, 1]} intensity={1.5} color="#b5e4ed" />
+          <Lightformer position={[10, 2, 0]} rotation={[0, -Math.PI / 2, 0]} scale={[10, 5, 1]} intensity={0.7} color="#ffd6df" />
+        </Environment>
+        {showCorridor && <><WavyCorridor /><OutsideScenery /></>}
+        <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, worldRotation, 0]}>
+          {showMeadow && <MeadowScene />}
+          {showPoolroom && <group position={[-1.2, 0, -12]}><PoolroomScene /></group>}
+          <WorldDoors scene={scene} open={open} setOpen={setOpen} setPrompt={setPrompt} enabled={playing} />
+        </group>
+        <EffectComposer multisampling={quality === 'ultra' ? 4 : 0}>
+          <Bloom luminanceThreshold={1.1} mipmapBlur intensity={0.24} />
+          <Vignette eskil={false} offset={0.25} darkness={0.22} />
+        </EffectComposer>
+        {!touch && <PointerLockControls ref={controls} selector="#resume-dream" onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />}
+        <FPSController scene={scene} setScene={setScene} open={open} enabled={playing} spawn={spawn} touch={touch} />
+      </Suspense>
+    </Canvas>
+    <audio ref={audio} src="/bg-loop.mp3" loop preload="none" />
+    <MobileControls enabled={touch && playing} />
+    <div className="world-hud"><span className="wordmark">DREAMCORE<span> / </span>WANDER FREELY</span><span className="location">{sceneNames[scene]}</span></div>
+    {playing && <><div className="crosshair" /><div className="travel-note">Every doorway leads both ways</div></>}
+    {playing && prompt && <button className="door-prompt" onClick={() => document.dispatchEvent(new Event('dream-interact'))}><kbd>{touch ? 'TAP' : 'E'}</kbd>{prompt}</button>}
+    {(!entered || (!touch && !locked)) && <div className="welcome">
+      <div className="welcome-content"><p className="eyebrow">A PLACE BETWEEN PLACES</p><h1>Stay a little<br /><em>longer.</em></h1>
+        <p className="intro">Follow the light. Find a doorway.<br />You can always find your way back.</p>
+        <button id="resume-dream" className="enter-button" onClick={resume}>{entered ? 'Return to the dream' : 'Enter the dream'} <span>&#8599;</span></button>
+        <div className="settings"><label>Graphics <select value={quality} onChange={e => setQuality(e.target.value)}><option value="ultra">Ultra HD</option><option value="balanced">Balanced</option></select></label><button onClick={() => setMuted(value => !value)}>Sound {muted ? 'off' : 'on'}</button></div>
+        <p className="controls-hint">{touch ? 'Left thumb to move / Right thumb to look / Tap to open doors' : 'WASD / Arrows to move / Mouse to look / E for doors / Shift to run / Esc to pause'}</p>
+      </div><span className="welcome-index">01 — ∞<br />NO WRONG TURNS</span>
+    </div>}
+    <Loader />
+  </main>;
 }

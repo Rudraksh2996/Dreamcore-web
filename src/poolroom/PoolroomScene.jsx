@@ -414,11 +414,10 @@ export const PoolroomScene = (props) => {
             <mesh position={[0, 1.05, 0.01]}><planeGeometry args={[1.2, 2.1]} /><meshStandardMaterial color="#555" /></mesh>
          </group>
          
-         {/* Front Wall */}
-         <group position={[0, 0, 0]} rotation={[0, Math.PI, 0]}>
-            <mesh position={[0, 1.85, 0]}><planeGeometry args={[POOLROOM_WIDTH, 1.9]} /><meshStandardMaterial map={texUpper} roughness={0.8} /></mesh>
-            <mesh position={[0, 0.45, 0]}><planeGeometry args={[POOLROOM_WIDTH, 0.9]} /><meshStandardMaterial map={texLower} roughness={0.8} /></mesh>
-            <mesh position={[0, 0.9, 0]}><planeGeometry args={[POOLROOM_WIDTH, 0.05]} /><meshStandardMaterial color="#fff" roughness={0.9} /></mesh>
+         {/* Real return doorway, aligned with the meadow exit. */}
+         <group rotation={[0, Math.PI, 0]}>
+            {[-1, 1].map(side => <mesh key={side} position={[side * 3.775, 1.4, 0]} receiveShadow><planeGeometry args={[6.45, 2.8]} /><meshStandardMaterial map={texUpper} roughness={0.65} /></mesh>)}
+            <mesh position={[0, 2.45, 0]} receiveShadow><planeGeometry args={[1.1, 0.7]} /><meshStandardMaterial map={texUpper} roughness={0.65} /></mesh>
          </group>
 
          {/* Details */}
