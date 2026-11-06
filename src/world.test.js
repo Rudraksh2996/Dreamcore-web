@@ -48,3 +48,28 @@ test('threshold hysteresis avoids toggling scenes at the door plane', () => {
     assert.equal(constrainMovement(toWorld(0, 0), scene, allOpen), scene);
   }
 });
+
+test('a continuous walk completes the entire world and returns along the same route', () => {
+  let scene = 'corridor';
+  let position = toWorld(0, 2);
+  const changes = [];
+  const walkTo = destination => {
+    const steps = Math.ceil(position.distanceTo(destination) / 0.04);
+    const step = destination.clone().sub(position).divideScalar(steps);
+    for (let i = 0; i < steps; i++) {
+      const next = position.clone().add(step);
+      const room = constrainMovement(next, scene, allOpen);
+      if (room !== scene) { changes.push(room); scene = room; }
+      position = next;
+    }
+    assert.ok(position.distanceTo(destination) < 1e-6, 'the walk must not hit an invisible wall');
+  };
+  walkTo(toWorld(0, -1));
+  walkTo(toWorld(-1.2, -6));
+  walkTo(toWorld(-1.2, -13));
+  walkTo(toWorld(-1.2, -30));
+  walkTo(toWorld(-1.2, -11));
+  walkTo(toWorld(0, -6));
+  walkTo(toWorld(0, 2));
+  assert.deepEqual(changes, ['meadow', 'poolroom', 'meadow', 'corridor']);
+});

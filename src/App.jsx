@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, Lightformer, Sky, Clouds, Cloud, MeshTransmissionMaterial, Loader, PerformanceMonitor } from '@react-three/drei';
-import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
+import { EffectComposer, Bloom, Vignette, ToneMapping, N8AO } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { MeadowScene } from './meadow/MeadowScene';
 import { PoolroomScene } from './poolroom/PoolroomScene';
@@ -107,6 +107,7 @@ function MobileControls({ enabled }) {
     window.addEventListener('blur', reset);
     return () => { window.removeEventListener('blur', reset); reset(); };
   }, []);
+  useEffect(() => { pointers.current.clear(); window.__joystick = { x: 0, y: 0 }; setStick(null); }, [enabled]);
   if (!enabled) return null;
   return <div className="mobile-controls" aria-label="Touch movement and look controls"
     onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, move: e.clientX < innerWidth / 2 }); }}
@@ -241,7 +242,7 @@ export default function App() {
   const [scene, setScene] = useState(startScene);
   const [open, setOpen] = useState({ meadow: false, poolroom: false });
   const [prompt, setPrompt] = useState('');
-  const [touch] = useState(() => matchMedia('(pointer: coarse)').matches);
+  const [touch] = useState(() => matchMedia('(pointer: coarse)').matches || (import.meta.env.DEV && new URLSearchParams(location.search).get('controls') === 'touch'));
   const [locked, setLocked] = useState(false);
   const [paused, setPaused] = useState(false);
   const [visible, setVisible] = useState(true);
@@ -285,7 +286,7 @@ export default function App() {
   const dpr = quality === 'ultra' ? Math.min(Math.max(devicePixelRatio || 1, 1.5), 2) : Math.min(autoDpr, 1.5);
   return <main className="dream-world">
     <Canvas onCreated={({ gl }) => { canvasElement.current = gl.domElement; }} shadows={THREE.PCFShadowMap} dpr={dpr} camera={{ fov: 68, near: 0.05, far: 450, position: spawn.position.toArray() }}
-      gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}>
+      gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.NoToneMapping, toneMappingExposure: 1.1 }}>
       <PerformanceMonitor onIncline={() => setAutoDpr(touch ? 1.25 : 1.5)} onDecline={() => setAutoDpr(1)} flipflops={3} onFallback={() => setAutoDpr(1)} />
       <color attach="background" args={[scene === 'poolroom' ? POOLROOM_BG : '#7bb8d4']} />
       <fog attach="fog" args={[scene === 'poolroom' ? POOLROOM_FOG.color : '#9dcbd9', scene === 'poolroom' ? 15 : 45, scene === 'poolroom' ? 65 : 240]} />
@@ -302,7 +303,9 @@ export default function App() {
           <WorldDoors scene={scene} open={open} setOpen={setOpen} setPrompt={setPrompt} enabled={playing} />
         </group>
         <EffectComposer multisampling={quality === 'ultra' ? 4 : 0}>
+          {quality === 'ultra' && <N8AO halfRes aoRadius={0.45} intensity={1.2} quality="performance" />}
           <Bloom luminanceThreshold={1.1} mipmapBlur intensity={0.24} />
+          <ToneMapping />
           <Vignette eskil={false} offset={0.25} darkness={0.22} />
         </EffectComposer>
 

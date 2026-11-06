@@ -1,16 +1,51 @@
-# React + Vite
+# Dreamcore — Wander Freely
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+An atmospheric first-person browser world connecting the Tidal Passage, Sky Garden and Stillwater Hall. Walk through either doorway in either direction, reopen it from either side, and return along the same route. Door state remains shared across both rooms.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Requires Node.js 22.12+ (Node.js 24 recommended).
 
-## React Compiler
+```sh
+npm ci
+npm run dev
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Open the Local URL printed by Vite. `npm run build` creates `dist/` for the existing static/Vercel deployment. `npm run preview` serves that production build.
 
-## Expanding the Oxlint configuration
+## Controls
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+- WASD or arrow keys: move. Shift: run.
+- Mouse: look; drag on the scene if browser mouse capture is unavailable.
+- E: open or close the door you are looking at. Step away from the threshold before closing it.
+- Escape: pause. Use Return to the dream to continue.
+- Touch: left half moves, right half looks; tap the door prompt to interact.
+- The pause screen offers sound controls and Ultra HD / Balanced graphics. Balanced adapts resolution to measured performance.
+
+## World and graphics
+
+All three scenes share a continuous coordinate system, real doorway openings and one collision controller. Crossing changes the active room without teleporting the camera. Open neighboring rooms stay visible through their doorways; closed distant rooms can unmount.
+
+Ultra HD uses up to 2x device pixel ratio, multisampling and ambient occlusion. Both presets include physically based ceramic tiles with relief maps, local environment lighting, filmic tone mapping, bloom, animated water with Fresnel reflections and a detailed cloud panorama. Instanced grass has separate attributes per chunk and animated wind.
+
+Environment assets are bundled locally; see `public/ASSET-NOTES.md` for provenance and the image-generation prompt. The existing background audio is retained.
+
+## Validation
+
+```sh
+npm test
+npm run build
+```
+
+The tests exercise repeated travel in both directions, closed doors, side walls, room limits, world transforms, threshold hysteresis and a continuous round trip.
+
+Development-only inspection URLs (not enabled in production):
+
+- `/?scene=meadow`: garden entrance, looking inward.
+- `/?scene=meadow&cam=back`: garden entrance, looking back toward the corridor.
+- `/?scene=meadow&cam=exit`: garden exit, looking toward the poolroom.
+- `/?scene=poolroom&cam=back`: poolroom entrance, looking back toward the garden.
+- `/?scene=corridor&cam=exit`: corridor end near the garden.
+- Add `&controls=touch` to inspect touch controls on a desktop browser.
+
+Browser QA: verified corridor/garden and garden/poolroom travel in both directions; E-key and touch-prompt opening; desktop mouse-capture fallback; 390 x 844 mobile layout. Physical-device touch/GPU performance still depends on the device and should be checked on target hardware.
