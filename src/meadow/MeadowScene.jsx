@@ -1,16 +1,32 @@
 import React, { useMemo, useEffect } from 'react';
 import * as THREE from 'three';
-import { generateSkyMural } from './SkyMural';
+import { useTexture } from '@react-three/drei';
 import { SunFixture } from './SunFixture';
 import { Doors } from './Doors';
 import { Grass } from './Grass';
 
+useTexture.preload('/sky-garden-clouds.png');
+
+// Crop UVs against the original wall so the mural continues around real openings.
+function MuralPanel({ position, size, map }) {
+  const geometry = useMemo(() => {
+    const g = new THREE.PlaneGeometry(...size);
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) {
+      uv.setXY(i, (position[0] + (uv.getX(i) - 0.5) * size[0] + 3.5) / 7,
+        (position[1] + (uv.getY(i) - 0.5) * size[1]) / 3.2);
+    }
+    return g;
+  }, [position[0], position[1], size[0], size[1]]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return <mesh position={position} geometry={geometry} receiveShadow><meshStandardMaterial map={map} roughness={0.85} emissive="#a5cbdf" emissiveMap={map} emissiveIntensity={0.16} /></mesh>;
+}
+
 export const MeadowScene = () => {
-  const texLeft = useMemo(() => generateSkyMural(1, false, 12, 3.2), []);
-  const texRight = useMemo(() => generateSkyMural(2, false, 12, 3.2), []);
-  const texFront = useMemo(() => generateSkyMural(3, false, 7, 3.2), []);
-  const texBack = useMemo(() => generateSkyMural(4, false, 7, 3.2), []);
-  const texCeil = useMemo(() => generateSkyMural(5, true, 7, 12), []);
+  const cloudMap = useTexture('/sky-garden-clouds.png');
+  cloudMap.colorSpace = THREE.SRGBColorSpace;
+  cloudMap.anisotropy = 16;
+  const texLeft = cloudMap, texRight = cloudMap, texFront = cloudMap, texBack = cloudMap, texCeil = cloudMap;
 
   const pathTex = useMemo(() => {
      const canvas = document.createElement('canvas');
@@ -77,8 +93,8 @@ export const MeadowScene = () => {
   }, []);
 
   useEffect(() => {
-    return () => { [texLeft, texRight, texFront, texBack, texCeil, pathTex].forEach(t => t.dispose()); };
-  }, [texLeft, texRight, texFront, texBack, texCeil, pathTex]);
+    return () => { pathTex.dispose(); };
+  }, [pathTex]);
 
   // Use MeshStandardMaterial with baked fake GI (vertex colors or simple lightmap logic)
   // For simplicity, we just use the texture on Standard material and let lights do the work.
@@ -86,36 +102,31 @@ export const MeadowScene = () => {
   return (
     <group>
        {/* Lighting */}
-       <hemisphereLight skyColor="#2b87b5" groundColor="#f2a7ba" intensity={0.4} />
-       <ambientLight intensity={0.3} color="#ffe4e1" />
+       <hemisphereLight color="#b9e7ff" groundColor="#f2a7ba" intensity={1.0} />
+       <ambientLight intensity={0.45} color="#ffe4e1" />
        
        {/* Walls (Standard Material for lighting response) */}
-       <mesh position={[-3.5, 1.6, -6]} rotation={[0, Math.PI/2, 0]} receiveShadow><planeGeometry args={[12, 3.2]} /><meshStandardMaterial map={texLeft} roughness={0.9} /></mesh>
-       <mesh position={[3.5, 1.6, -6]} rotation={[0, -Math.PI/2, 0]} receiveShadow><planeGeometry args={[12, 3.2]} /><meshStandardMaterial map={texRight} roughness={0.9} /></mesh>
+       <mesh position={[-3.5, 1.6, -6]} rotation={[0, Math.PI/2, 0]} receiveShadow><planeGeometry args={[12, 3.2]} /><meshStandardMaterial map={texLeft} roughness={0.85} emissive="#a5cbdf" emissiveMap={texLeft} emissiveIntensity={0.16} /></mesh>
+       <mesh position={[3.5, 1.6, -6]} rotation={[0, -Math.PI/2, 0]} receiveShadow><planeGeometry args={[12, 3.2]} /><meshStandardMaterial map={texRight} roughness={0.85} emissive="#a5cbdf" emissiveMap={texRight} emissiveIntensity={0.16} /></mesh>
        <group position={[0, 0, -12]}>
-         <mesh position={[-2.625, 1.6, 0]} receiveShadow><planeGeometry args={[1.75, 3.2]} /><meshStandardMaterial map={texFront} roughness={0.9} /></mesh>
-         <mesh position={[1.425, 1.6, 0]} receiveShadow><planeGeometry args={[4.15, 3.2]} /><meshStandardMaterial map={texFront} roughness={0.9} /></mesh>
-         <mesh position={[-1.2, 2.65, 0]} receiveShadow><planeGeometry args={[1.1, 1.1]} /><meshStandardMaterial map={texFront} roughness={0.9} /></mesh>
+         <MuralPanel position={[-2.625, 1.6, 0]} size={[1.75, 3.2]} map={texFront} />
+         <MuralPanel position={[1.425, 1.6, 0]} size={[4.15, 3.2]} map={texFront} />
+         <MuralPanel position={[-1.2, 2.65, 0]} size={[1.1, 1.1]} map={texFront} />
        </group>
        <group rotation={[0, Math.PI, 0]}>
-         {[-1, 1].map(side => <mesh key={side} position={[side * 2.025, 1.6, 0]} receiveShadow><planeGeometry args={[2.95, 3.2]} /><meshStandardMaterial map={texBack} roughness={0.9} /></mesh>)}
-         <mesh position={[0, 2.65, 0]} receiveShadow><planeGeometry args={[1.1, 1.1]} /><meshStandardMaterial map={texBack} roughness={0.9} /></mesh>
+         {[-1, 1].map(side => <MuralPanel key={side} position={[side * 2.025, 1.6, 0]} size={[2.95, 3.2]} map={texBack} />)}
+         <MuralPanel position={[0, 2.65, 0]} size={[1.1, 1.1]} map={texBack} />
        </group>
-       
+
        {/* Ceiling */}
        <mesh position={[0, 3.2, -6]} rotation={[Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[7, 12]} /><meshStandardMaterial map={texCeil} roughness={1.0} /></mesh>
        
-       {/* Trim (offset by 5mm to avoid z-fighting with walls/ceiling/floor) */}
-       {/* Baseboard */}
-       <mesh position={[0, 0.05, -6]} receiveShadow>
-         <boxGeometry args={[6.99, 0.1, 11.99]} />
-         <meshStandardMaterial color="#f2a7ba" roughness={0.45} side={THREE.BackSide} />
-       </mesh>
-       {/* Crown molding (Cove + Bead profile via simple box for now, offset down from ceiling) */}
-       <mesh position={[0, 3.14, -6]} receiveShadow>
-         <boxGeometry args={[6.99, 0.12, 11.99]} />
-         <meshStandardMaterial color="#f2a7ba" roughness={0.45} side={THREE.BackSide} />
-       </mesh>
+       {/* Narrow trim bars leave the lawn and both thresholds unobstructed. */}
+       {[-3.48, 3.48].map(x => <group key={x}>
+         <mesh position={[x, 0.06, -6]}><boxGeometry args={[0.04, 0.12, 12]} /><meshStandardMaterial color="#dfa3b1" roughness={0.45} /></mesh>
+         <mesh position={[x, 3.14, -6]}><boxGeometry args={[0.04, 0.08, 12]} /><meshStandardMaterial color="#dfa3b1" roughness={0.45} /></mesh>
+       </group>)}
+       {[0, -12].map(z => <mesh key={z} position={[0, 3.14, z]}><boxGeometry args={[7, 0.08, 0.04]} /><meshStandardMaterial color="#dfa3b1" roughness={0.45} /></mesh>)}
 
        {/* Path (raised 1cm above floor) */}
        <mesh position={[0, 0.01, -6]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>

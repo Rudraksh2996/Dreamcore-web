@@ -27,9 +27,9 @@ export const SunFixture = ({ position }) => {
     canvas.height = 256;
     const ctx = canvas.getContext('2d');
     const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-    grad.addColorStop(0, 'rgba(214, 242, 106, 0.8)'); // #d6f26a
-    grad.addColorStop(0.3, 'rgba(214, 242, 106, 0.4)');
-    grad.addColorStop(1, 'rgba(214, 242, 106, 0)');
+    grad.addColorStop(0, 'rgba(255, 234, 190, 0.3)'); // #d6f26a
+    grad.addColorStop(0.3, 'rgba(255, 234, 190, 0.15)');
+    grad.addColorStop(1, 'rgba(255, 234, 190, 0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 256, 256);
     const tex = new THREE.CanvasTexture(canvas);
@@ -47,11 +47,11 @@ export const SunFixture = ({ position }) => {
       {/* Core Star */}
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <shapeGeometry args={[starShape]} />
-        <meshStandardMaterial color="#ffe45c" emissive="#ffe45c" emissiveIntensity={3} toneMapped={false} />
+        <meshStandardMaterial color="#ffe45c" emissive="#ffe45c" emissiveIntensity={1.8} toneMapped={false} />
       </mesh>
       
       {/* Warm Point Light */}
-      <pointLight distance={10} decay={2} intensity={1.2} color="#d6f26a" position={[0, -0.2, 0]} />
+      <pointLight distance={10} decay={2} intensity={9} color="#fff1cd" position={[0, -0.2, 0]} />
     </group>
   );
 };

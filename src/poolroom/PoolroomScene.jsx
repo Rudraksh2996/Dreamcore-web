@@ -4,21 +4,22 @@ import * as THREE from 'three';
 import { POOLROOM_WIDTH, POOLROOM_LENGTH, WATER_LEVEL, CHAIR_COUNT, getShorelineZ, isWaterGLSL, POOLROOM_FOG } from './Constants';
 
 // Helper to generate textures
-const createWallTexture = (color, bump) => {
+const createWallTexture = (color, textured) => {
    const canvas = document.createElement('canvas');
-   canvas.width = 256; canvas.height = 256;
+   canvas.width = canvas.height = 1024;
    const ctx = canvas.getContext('2d');
    ctx.fillStyle = color;
-   ctx.fillRect(0,0,256,256);
-   if (bump) {
-      for(let i=0; i<5000; i++) {
-         ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
-         ctx.fillRect(Math.random()*256, Math.random()*256, 2, 2);
-      }
+   ctx.fillRect(0, 0, 1024, 1024);
+   if (textured) for (let i = 0; i < 35000; i++) {
+      ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.025)';
+      ctx.fillRect(Math.random() * 1024, Math.random() * 1024, 1, 1);
    }
-   const t = new THREE.CanvasTexture(canvas);
-   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-   return t;
+   const texture = new THREE.CanvasTexture(canvas);
+   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+   texture.repeat.set(12, 2);
+   texture.colorSpace = THREE.SRGBColorSpace;
+   texture.anisotropy = 16;
+   return texture;
 };
 
 const createCeilingTexture = () => {
@@ -44,6 +45,8 @@ const createCeilingTexture = () => {
    const t = new THREE.CanvasTexture(canvas);
    t.wrapS = t.wrapT = THREE.RepeatWrapping;
    t.repeat.set(POOLROOM_WIDTH / 1.2, POOLROOM_LENGTH / 1.2);
+   t.colorSpace = THREE.SRGBColorSpace;
+   t.anisotropy = 16;
    return t;
 };
 
@@ -65,34 +68,6 @@ const createSandNormalMap = () => {
    t.wrapS = t.wrapT = THREE.RepeatWrapping;
    t.repeat.set(POOLROOM_WIDTH, POOLROOM_LENGTH); 
    return t;
-};
-
-// Procedural PMREM envMap generator for the poolroom
-const ProceduralEnvMap = () => {
-    const [envMap, setEnvMap] = useState(null);
-    useEffect(() => {
-        const pmremGenerator = new THREE.PMREMGenerator(window.renderer || new THREE.WebGLRenderer());
-        pmremGenerator.compileEquirectangularShader();
-        
-        const envScene = new THREE.Scene();
-        envScene.background = new THREE.Color('#9ccbc5'); // Mint walls
-        const light = new THREE.Mesh(
-            new THREE.PlaneGeometry(10, 10),
-            new THREE.MeshBasicMaterial({ color: '#ffffff' })
-        );
-        light.position.set(0, 10, 0);
-        light.rotation.x = Math.PI / 2;
-        envScene.add(light);
-        
-        const rt = pmremGenerator.fromScene(envScene);
-        setEnvMap(rt.texture);
-        
-        return () => {
-            rt.dispose();
-            pmremGenerator.dispose();
-        };
-    }, []);
-    return envMap;
 };
 
 const FluorescentFixture = ({ position }) => {
@@ -119,15 +94,14 @@ const FluorescentFixture = ({ position }) => {
             <cylinderGeometry args={[0.02, 0.02, 1.1]} />
             <meshStandardMaterial color="#fff" emissive="#fff" emissiveIntensity={1.0} toneMapped={false} />
          </mesh>
-         <pointLight color="#fff0f5" intensity={8.0} distance={12} decay={2} position={[0, -0.1, 0]} />
+         {position[0] === (position[2] % 2 ? -3 : 3) && <pointLight color="#fff5e2" intensity={14} distance={15} decay={2} position={[0, -0.1, 0]} />}
       </group>
    );
 };
 
 export const PoolroomScene = (props) => {
-   const envMap = ProceduralEnvMap();
-   const texUpper = useMemo(() => createWallTexture('#9ccbc5', false), []); // Seafoam teal
-   const texLower = useMemo(() => createWallTexture('#e8a598', false), []); // Salmon-peach
+   const texUpper = useMemo(() => createWallTexture('#9ccbc5', true), []); // Seafoam teal
+   const texLower = useMemo(() => createWallTexture('#e8a598', true), []); // Salmon-peach
    const texCeiling = useMemo(() => createCeilingTexture(), []);
    const normalSand = useMemo(() => createSandNormalMap(), []);
 
@@ -146,7 +120,7 @@ export const PoolroomScene = (props) => {
       return geo;
    }, []);
 
-   const waterMatRef = useRef();
+   const root = useRef();
    const sandUniforms = useMemo(() => ({ uTime: { value: 0 } }), []);
 
    // Custom Sand Material (extends MeshStandardMaterial)
@@ -215,6 +189,7 @@ export const PoolroomScene = (props) => {
          depthWrite: false, // Render after sand/chairs, don't occlude
          uniforms: {
             uTime: { value: 0 },
+            uCamera: { value: new THREE.Vector3() },
             uColor: { value: new THREE.Color('#3ca6a6') },
             fogColor: { value: new THREE.Color(POOLROOM_FOG.color) },
             fogNear: { value: POOLROOM_FOG.near },
@@ -246,6 +221,7 @@ export const PoolroomScene = (props) => {
          fragmentShader: `
             uniform float uTime;
             uniform vec3 uColor;
+            uniform vec3 uCamera;
             uniform vec3 fogColor;
             uniform float fogNear;
             uniform float fogFar;
@@ -267,6 +243,15 @@ export const PoolroomScene = (props) => {
                // Absorption (Beer-Lambert approx)
                vec3 waterColor = mix(vec3(0.6, 0.9, 0.8), uColor, clamp(distToShore * 0.2, 0.0, 1.0));
                
+               vec3 normal = normalize(vec3(-cos(vLocalPos.x * 3.0 + uTime) * 0.045, 1.0, sin(vLocalPos.z * 2.0 + uTime * 0.8) * 0.03));
+               vec3 viewDir = normalize(uCamera - vLocalPos);
+               float fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(viewDir, normal), 0.0), 5.0);
+               vec3 reflected = reflect(-viewDir, normal);
+               vec3 reflection = mix(vec3(0.28, 0.60, 0.63), vec3(0.88, 0.95, 0.90), smoothstep(-0.2, 0.7, reflected.y));
+               float lightStrip = pow(max(0.0, sin(reflected.z * 16.0 + reflected.x * 8.0)), 40.0);
+               reflection += vec3(0.45, 0.40, 0.33) * lightStrip;
+               waterColor = mix(waterColor, reflection, fresnel * 0.85);
+               alpha = mix(alpha, 0.96, fresnel);
                // Specular glints
                float glint = pow(max(0.0, sin(vLocalPos.x * 10.0 - uTime) * cos(vLocalPos.z * 10.0 + uTime)), 20.0);
                waterColor += vec3(1.0) * glint * 0.5;
@@ -283,6 +268,8 @@ export const PoolroomScene = (props) => {
                // Fog
                float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
                gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogFactor);
+               #include <tonemapping_fragment>
+               #include <colorspace_fragment>
             }
          `
       });
@@ -291,8 +278,13 @@ export const PoolroomScene = (props) => {
    useFrame((state) => {
       const t = state.clock.elapsedTime;
       waterMat.uniforms.uTime.value = t;
+      if (root.current) waterMat.uniforms.uCamera.value.copy(root.current.worldToLocal(state.camera.position.clone()));
       sandUniforms.uTime.value = t;
    });
+
+   useEffect(() => () => {
+      [texUpper, texLower, texCeiling, normalSand, waterGeo, floorGeo, sandMat, waterMat].forEach(resource => resource.dispose());
+   }, [texUpper, texLower, texCeiling, normalSand, waterGeo, floorGeo, sandMat, waterMat]);
 
    // Chairs Instancing (Separate Cushions and Frame)
    const { cushionsGeo, frameGeo } = useMemo(() => {
@@ -375,13 +367,13 @@ export const PoolroomScene = (props) => {
    }, []);
 
    return (
-      <group {...props}>
+      <group {...props} ref={root}>
          {/* Atmosphere applied if native render (Portal applies its own) */}
-         <hemisphereLight skyColor="#dff3ef" groundColor="#e6c7d6" intensity={1.1} />
+         <hemisphereLight color="#dff3ef" groundColor="#e6c7d6" intensity={1.1} />
          <ambientLight intensity={0.2} />
 
          {/* Floor & Water (RenderOrder ensures water draws over sand/chairs) */}
-         <mesh geometry={floorGeo} material={sandMat} renderOrder={1} />
+         <mesh receiveShadow geometry={floorGeo} material={sandMat} renderOrder={1} />
          <mesh geometry={waterGeo} material={waterMat} renderOrder={3} />
 
          {/* Ceiling */}
@@ -438,19 +430,15 @@ export const PoolroomScene = (props) => {
          ))}
 
          {/* Chairs Render */}
-         <instancedMesh ref={cushionInstRef} args={[null, null, CHAIR_COUNT]} renderOrder={2}>
+         <instancedMesh ref={cushionInstRef} args={[null, null, CHAIR_COUNT]} renderOrder={2} castShadow receiveShadow>
             <primitive object={cushionsGeo} attach="geometry" />
             <primitive object={cushionMat} attach="material" />
          </instancedMesh>
-         <instancedMesh ref={frameInstRef} args={[null, null, CHAIR_COUNT]} renderOrder={2}>
+         <instancedMesh ref={frameInstRef} args={[null, null, CHAIR_COUNT]} renderOrder={2} castShadow receiveShadow>
             <primitive object={frameGeo} attach="geometry" />
             <primitive object={frameMat} attach="material" />
          </instancedMesh>
          
-         {/* Apply envMap to materials that need it (frameMat) */}
-         {envMap && (
-            <primitive object={frameMat} envMap={envMap} envMapIntensity={1.0} />
-         )}
       </group>
    );
 };

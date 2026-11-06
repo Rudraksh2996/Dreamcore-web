@@ -3,7 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
 const CHUNK_SIZE = 2; // 2x2 meter chunks
-const GRASS_DENSITY = 10000; // 10,000 per sq meter
+const GRASS_DENSITY = 1800; // Dense instanced blades without redundant overdraw
 const MEADOW_WIDTH = 7.0; // wall to wall width (room is 7m wide)
 const MEADOW_LENGTH = 12.0;
 
@@ -15,6 +15,9 @@ const hexToLinear = (hex) => {
 
 const GrassChunk = ({ cx, cz, geom, mat }) => {
   const meshRef = useRef();
+  // Instance attributes belong to each chunk, not to the shared blade geometry.
+  const chunkGeometry = useMemo(() => geom.clone(), [geom]);
+  useEffect(() => () => chunkGeometry.dispose(), [chunkGeometry]);
 
   useEffect(() => {
     if (!meshRef.current) return;
@@ -96,13 +99,14 @@ const GrassChunk = ({ cx, cz, geom, mat }) => {
     meshRef.current.count = added;
     if (!geom.boundingSphere) geom.computeBoundingSphere();
     
-    geom.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
-    geom.setAttribute('aGrassAttr', new THREE.InstancedBufferAttribute(attributes, 4));
+    chunkGeometry.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
+    chunkGeometry.setAttribute('aGrassAttr', new THREE.InstancedBufferAttribute(attributes, 4));
     
     meshRef.current.instanceMatrix.needsUpdate = true;
-  }, [cx, cz, geom]);
+    meshRef.current.computeBoundingSphere();
+  }, [cx, cz, geom, chunkGeometry]);
 
-  return <instancedMesh ref={meshRef} args={[geom, mat, Math.floor(CHUNK_SIZE * CHUNK_SIZE * GRASS_DENSITY)]} receiveShadow castShadow />;
+  return <instancedMesh ref={meshRef} args={[chunkGeometry, mat, Math.floor(CHUNK_SIZE * CHUNK_SIZE * GRASS_DENSITY)]} receiveShadow castShadow />;
 };
 
 export const Grass = (props) => {
@@ -185,10 +189,10 @@ export const Grass = (props) => {
         `
       );
       
-      const rootL = hexToLinear(0x2a3e22);
-      const bodyL = hexToLinear(0x30472a);
-      const tipL = hexToLinear(0x454f36);
-      const strawL = hexToLinear(0x535842);
+      const rootL = hexToLinear(0x243b24);
+      const bodyL = hexToLinear(0x477144);
+      const tipL = hexToLinear(0x8ca25b);
+      const strawL = hexToLinear(0xc3b779);
       
       shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>\nvarying float vHeight;\nvarying vec3 vWorldPos;\nvarying float vWindPhase;\nvarying vec4 vGrassAttr;\n`)
                                                .replace('void main() {', `void main() {\nvHeight = position.y / 0.10;\nvWorldPos = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;\nvWindPhase = sin(vWorldPos.z * 1.5 - uTime * 1.5 * 1.2 + aPhase);\nvGrassAttr = aGrassAttr;\n`);

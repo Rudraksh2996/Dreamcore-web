@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { PointerLockControls, Environment, Lightformer, Sky, Clouds, Cloud, MeshTransmissionMaterial, Loader, PerformanceMonitor } from '@react-three/drei';
+import { Environment, Lightformer, Sky, Clouds, Cloud, MeshTransmissionMaterial, Loader, PerformanceMonitor } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { MeadowScene } from './meadow/MeadowScene';
@@ -10,39 +10,38 @@ import { gateConfig, worldRotation, toLocal, toWorld, constrainMovement } from '
 import { WorldDoors } from './WorldDoors';
 import './App.css';
 
-function useTileMaterial(color, groutColor = '#e2eeef') {
-  const tex = useMemo(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512; canvas.height = 512;
-    const ctx = canvas.getContext('2d');
-    
-    ctx.fillStyle = groutColor;
-    ctx.fillRect(0, 0, 512, 512);
-    
-    const padding = 512 * 0.015;
-    ctx.fillStyle = color;
-    ctx.fillRect(padding, padding, 512 - padding * 2, 512 - padding * 2);
-    
-    const grad = ctx.createLinearGradient(padding, padding, 512, 512);
-    grad.addColorStop(0, 'rgba(255, 255, 255, 0.7)');
-    grad.addColorStop(0.2, 'rgba(255, 255, 255, 0.0)');
-    grad.addColorStop(0.8, 'rgba(0, 0, 0, 0.0)');
-    grad.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(padding, padding, 512 - padding * 2, 512 - padding * 2);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(2, 2);
-    texture.anisotropy = 16;
-    texture.colorSpace = THREE.SRGBColorSpace;
-    return texture;
+function useTileMaterial(color, groutColor = '#d9e6df') {
+  const maps = useMemo(() => {
+    const size = 1024, cell = size / 4;
+    const canvas = document.createElement('canvas'), relief = document.createElement('canvas');
+    canvas.width = canvas.height = relief.width = relief.height = size;
+    const ctx = canvas.getContext('2d'), height = relief.getContext('2d');
+    ctx.fillStyle = groutColor; ctx.fillRect(0, 0, size, size);
+    height.fillStyle = '#252525'; height.fillRect(0, 0, size, size);
+    for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) {
+      const x = col * cell + 3, y = row * cell + 3;
+      const tint = new THREE.Color(color).multiplyScalar(0.94 + ((row * 7 + col * 3) % 9) * 0.015);
+      ctx.fillStyle = `#${tint.getHexString()}`; ctx.fillRect(x, y, cell - 6, cell - 6);
+      const bevel = height.createLinearGradient(x, y, x + cell, y + cell);
+      bevel.addColorStop(0, '#787878'); bevel.addColorStop(0.025, '#dadada'); bevel.addColorStop(0.975, '#dadada'); bevel.addColorStop(1, '#787878');
+      height.fillStyle = bevel; height.fillRect(x, y, cell - 6, cell - 6);
+    }
+    const image = ctx.getImageData(0, 0, size, size);
+    for (let i = 0; i < image.data.length; i += 4) {
+      const grain = Math.sin(i * 12.9898) * 1.5;
+      image.data[i] += grain; image.data[i + 1] += grain; image.data[i + 2] += grain;
+    }
+    ctx.putImageData(image, 0, 0);
+    const map = new THREE.CanvasTexture(canvas), bumpMap = new THREE.CanvasTexture(relief);
+    for (const texture of [map, bumpMap]) { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(0.5, 0.5); texture.anisotropy = 16; }
+    map.colorSpace = THREE.SRGBColorSpace;
+    return { map, bumpMap };
   }, [color, groutColor]);
-
-  return { map: tex, roughness: 0.22, metalness: 0.0, clearcoat: 0.35, clearcoatRoughness: 0.02 };
+  useEffect(() => () => { maps.map.dispose(); maps.bumpMap.dispose(); }, [maps]);
+  return { ...maps, bumpScale: 0.022, roughness: 0.24, metalness: 0, clearcoat: 0.65, clearcoatRoughness: 0.12 };
 }
 
-function FPSController({ scene, setScene, open, enabled, spawn, touch }) {
+function FPSController({ scene, setScene, open, enabled, spawn, touch, locked }) {
   const { camera } = useThree();
   const keys = useRef(new Set());
   const velocity = useRef(new THREE.Vector3());
@@ -63,8 +62,19 @@ function FPSController({ scene, setScene, open, enabled, spawn, touch }) {
       window.removeEventListener('blur', clear); document.removeEventListener('visibilitychange', clear); document.removeEventListener('pointerlockchange', clear);
     };
   }, []);
+  useEffect(() => {
+    const drag = event => {
+      if (!enabled || touch || locked || !event.buttons || event.target.tagName !== 'CANVAS') return;
+      camera.rotation.y -= event.movementX * 0.003;
+      camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - event.movementY * 0.003, -1.48, 1.48);
+    };
+    const mouse = event => { if (!enabled || !locked) return; camera.rotation.y -= event.movementX * 0.002; camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - event.movementY * 0.002, -1.48, 1.48); };
+    document.addEventListener('mousemove', mouse);
+    document.addEventListener('pointermove', drag);
+    return () => { document.removeEventListener('pointermove', drag); document.removeEventListener('mousemove', mouse); };
+  }, [camera, enabled, touch, locked]);
   useFrame((_, delta) => {
-    if (!enabled || (!touch && !document.pointerLockElement)) { velocity.current.set(0, 0, 0); return; }
+    if (!enabled) { velocity.current.set(0, 0, 0); return; }
     const dt = Math.min(delta, 0.04);
     const look = window.__lookDelta;
     if (look) {
@@ -174,9 +184,10 @@ const WavyCorridor = () => {
     return { leftWallGeoms: segmentedLeftWalls, trim: trimGeom, rightWall: rightGeom, floor: floorGeom, ceiling: ceilGeom, water: waterGeom, waterBase: waterBaseGeom };
   }, []);
 
-  const pinkTiles = useTileMaterial('#f99cba', '#e2eeef');
-  const cyanTiles = useTileMaterial('#5ab8d2', '#e2eeef');
-  const ceilingMaterial = new THREE.MeshStandardMaterial({ color: '#fff9e6', roughness: 0.4 });
+  const pinkTiles = useTileMaterial('#e6a2b8', '#e2eeef');
+  const cyanTiles = useTileMaterial('#70becb', '#e2eeef');
+  const ceilingMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: '#fff9e6', roughness: 0.4 }), []);
+  useEffect(() => () => { [...leftWallGeoms, trim, rightWall, floor, ceiling, water, waterBase, ceilingMaterial].forEach(resource => resource.dispose()); }, [leftWallGeoms, trim, rightWall, floor, ceiling, water, waterBase, ceilingMaterial]);
 
   return (
     <group>
@@ -193,14 +204,14 @@ const WavyCorridor = () => {
         return (
           <group key={`light-${i}`} position={[x, 7.98, z]}>
             <mesh rotation={[Math.PI / 2, 0, 0]}><circleGeometry args={[0.4, 32]} /><meshBasicMaterial color="#ffffff" /></mesh>
-            <pointLight intensity={2.0} color="#ffebba" distance={15} decay={2} />
+            {i % 2 === 0 && <pointLight intensity={9} color="#fff0cf" distance={24} decay={2} />}
           </group>
         );
       })}
       
       <group position={[gateConfig.x, 0, gateConfig.z]} rotation={[0, worldRotation, 0]}>
-        {[-1, 1].map(side => <mesh key={side} position={[side * 1.8, 4, 0]} receiveShadow><boxGeometry args={[2.5, 8, 0.12]} /><meshPhysicalMaterial {...cyanTiles} /></mesh>)}
-        <mesh position={[0, 5.05, 0]} receiveShadow><boxGeometry args={[1.1, 5.9, 0.12]} /><meshPhysicalMaterial {...cyanTiles} /></mesh>
+        {[-1, 1].map(side => <mesh key={side} position={[side * 1.8, 4, 0]} receiveShadow><planeGeometry args={[2.5, 8]} /><meshPhysicalMaterial {...cyanTiles} /></mesh>)}
+        <mesh position={[0, 5.05, 0]} receiveShadow><planeGeometry args={[1.1, 5.9]} /><meshPhysicalMaterial {...cyanTiles} /></mesh>
       </group>
     </group>
   );
@@ -210,11 +221,11 @@ const OutsideScenery = () => {
   return (
     <group position={[-60, -15, -40]}>
       <Sky sunPosition={[-100, 2, 20]} turbidity={0.1} rayleigh={0.1} mieCoefficient={0.001} mieDirectionalG={0.9} />
-      <directionalLight position={[-80, 20, 10]} intensity={5.0} color="#ffdd99" castShadow />
-      <Clouds material={THREE.MeshLambertMaterial} limit={400}>
-        <Cloud seed={1} segments={100} bounds={[80, 15, 160]} volume={80} color="#4a88b5" position={[0, -5, 0]} opacity={0.9} />
-        <Cloud seed={2} segments={80} bounds={[70, 10, 150]} volume={60} color="#8bb8d6" position={[-10, 2, 10]} opacity={0.8} />
-        <Cloud seed={3} segments={80} bounds={[60, 8, 140]} volume={50} color="#ffffff" position={[-5, 8, -10]} opacity={0.9} />
+      <directionalLight position={[-80, 20, 10]} intensity={3.2} color="#ffe3ba" />
+      <Clouds texture="/cloud-soft.svg" material={THREE.MeshLambertMaterial} limit={400}>
+        <Cloud seed={1} segments={45} bounds={[80, 15, 160]} volume={80} color="#4a88b5" position={[0, -5, 0]} opacity={0.9} />
+        <Cloud seed={2} segments={35} bounds={[70, 10, 150]} volume={60} color="#8bb8d6" position={[-10, 2, 10]} opacity={0.8} />
+        <Cloud seed={3} segments={35} bounds={[60, 8, 140]} volume={50} color="#ffffff" position={[-5, 8, -10]} opacity={0.9} />
       </Clouds>
     </group>
   );
@@ -223,6 +234,7 @@ const OutsideScenery = () => {
 const sceneNames = { corridor: 'The Tidal Passage', meadow: 'The Sky Garden', poolroom: 'The Stillwater Hall' };
 const initialScene = import.meta.env.DEV ? new URLSearchParams(location.search).get('scene') : null;
 const startScene = sceneNames[initialScene] ? initialScene : 'corridor';
+const inspectCamera = import.meta.env.DEV ? new URLSearchParams(location.search).get('cam') : null;
 
 export default function App() {
   const [entered, setEntered] = useState(false);
@@ -231,15 +243,27 @@ export default function App() {
   const [prompt, setPrompt] = useState('');
   const [touch] = useState(() => matchMedia('(pointer: coarse)').matches);
   const [locked, setLocked] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [visible, setVisible] = useState(true);
   const [quality, setQuality] = useState(touch ? 'balanced' : 'ultra');
   const [autoDpr, setAutoDpr] = useState(touch ? 1.25 : 1.75);
   const [muted, setMuted] = useState(false);
   const spawn = useMemo(() => ({
-    position: startScene === 'meadow' ? toWorld(0, -1) : startScene === 'poolroom' ? toWorld(-1.2, -13) : new THREE.Vector3(4.75, 1.6, -2),
-    yaw: startScene === 'corridor' ? 0 : worldRotation,
+    position: startScene === 'meadow' ? (inspectCamera === 'exit' ? toWorld(-1.2, -11) : toWorld(0, -1.5)) : startScene === 'poolroom' ? toWorld(-1.2, -13.5) : inspectCamera === 'exit' ? toWorld(0, 1.5) : new THREE.Vector3(4.75, 1.6, -2),
+    yaw: (startScene === 'corridor' ? 0 : worldRotation) + (inspectCamera === 'back' ? Math.PI : 0),
   }), []);
-  const controls = useRef(), audio = useRef();
+  const canvasElement = useRef(), audio = useRef();
+  useEffect(() => {
+    let wasLocked = false;
+    const change = () => { const isLocked = document.pointerLockElement === canvasElement.current; setLocked(isLocked); if (wasLocked && !isLocked) setPaused(true); wasLocked = isLocked; };
+    document.addEventListener('pointerlockchange', change);
+    return () => document.removeEventListener('pointerlockchange', change);
+  }, []);
+  useEffect(() => {
+    const pause = event => { if (event.code === 'Escape') setPaused(true); };
+    document.addEventListener('keydown', pause);
+    return () => document.removeEventListener('keydown', pause);
+  }, []);
   useEffect(() => {
     const update = () => setVisible(document.visibilityState === 'visible');
     document.addEventListener('visibilitychange', update);
@@ -248,14 +272,19 @@ export default function App() {
   useEffect(() => {
     if (audio.current) { audio.current.muted = muted; if (entered && visible) audio.current.play().catch(() => {}); else audio.current.pause(); }
   }, [entered, visible, muted]);
-  const resume = () => { setEntered(true); if (!touch) controls.current?.lock(); };
-  const playing = entered && visible && (touch || locked);
-  const showCorridor = scene === 'corridor' || (scene === 'meadow' && open.meadow);
+  const resume = () => {
+    setEntered(true); setPaused(false);
+    if (!touch) {
+      try { canvasElement.current?.requestPointerLock()?.catch(() => {}); } catch { /* Drag-to-look remains available. */ }
+    }
+  };
+  const playing = entered && visible && !paused;
+  const showCorridor = scene === 'corridor' || (open.meadow && (scene === 'meadow' || open.poolroom));
   const showMeadow = scene === 'meadow' || (scene === 'corridor' && open.meadow) || (scene === 'poolroom' && open.poolroom);
   const showPoolroom = scene === 'poolroom' || (showMeadow && open.poolroom);
   const dpr = quality === 'ultra' ? Math.min(Math.max(devicePixelRatio || 1, 1.5), 2) : Math.min(autoDpr, 1.5);
   return <main className="dream-world">
-    <Canvas shadows dpr={dpr} camera={{ fov: 68, near: 0.05, far: 450, position: spawn.position.toArray() }}
+    <Canvas onCreated={({ gl }) => { canvasElement.current = gl.domElement; }} shadows={THREE.PCFShadowMap} dpr={dpr} camera={{ fov: 68, near: 0.05, far: 450, position: spawn.position.toArray() }}
       gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}>
       <PerformanceMonitor onIncline={() => setAutoDpr(touch ? 1.25 : 1.5)} onDecline={() => setAutoDpr(1)} flipflops={3} onFallback={() => setAutoDpr(1)} />
       <color attach="background" args={[scene === 'poolroom' ? POOLROOM_BG : '#7bb8d4']} />
@@ -276,16 +305,16 @@ export default function App() {
           <Bloom luminanceThreshold={1.1} mipmapBlur intensity={0.24} />
           <Vignette eskil={false} offset={0.25} darkness={0.22} />
         </EffectComposer>
-        {!touch && <PointerLockControls ref={controls} selector="#resume-dream" onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />}
-        <FPSController scene={scene} setScene={setScene} open={open} enabled={playing} spawn={spawn} touch={touch} />
+
+        <FPSController scene={scene} setScene={setScene} open={open} enabled={playing} spawn={spawn} touch={touch} locked={locked} />
       </Suspense>
     </Canvas>
     <audio ref={audio} src="/bg-loop.mp3" loop preload="none" />
     <MobileControls enabled={touch && playing} />
     <div className="world-hud"><span className="wordmark">DREAMCORE<span> / </span>WANDER FREELY</span><span className="location">{sceneNames[scene]}</span></div>
-    {playing && <><div className="crosshair" /><div className="travel-note">Every doorway leads both ways</div></>}
+    {playing && <><div className="crosshair" /><div className="travel-note">{!touch && !locked ? 'Drag to look · ' : ''}Every doorway leads both ways</div></>}
     {playing && prompt && <button className="door-prompt" onClick={() => document.dispatchEvent(new Event('dream-interact'))}><kbd>{touch ? 'TAP' : 'E'}</kbd>{prompt}</button>}
-    {(!entered || (!touch && !locked)) && <div className="welcome">
+    {(!entered || paused) && <div className="welcome">
       <div className="welcome-content"><p className="eyebrow">A PLACE BETWEEN PLACES</p><h1>Stay a little<br /><em>longer.</em></h1>
         <p className="intro">Follow the light. Find a doorway.<br />You can always find your way back.</p>
         <button id="resume-dream" className="enter-button" onClick={resume}>{entered ? 'Return to the dream' : 'Enter the dream'} <span>&#8599;</span></button>
