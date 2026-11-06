@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Environment, Lightformer, Sky, Clouds, Cloud, MeshTransmissionMaterial, Loader, PerformanceMonitor } from '@react-three/drei';
+import { Environment, Lightformer, useTexture, MeshTransmissionMaterial, Loader, PerformanceMonitor } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette, ToneMapping, N8AO } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { MeadowScene } from './meadow/MeadowScene';
@@ -87,7 +87,7 @@ function FPSController({ scene, setScene, open, enabled, spawn, touch, locked })
     if (direction.lengthSq() > 1) direction.normalize();
     const local = toLocal(camera.position);
     const wading = scene === 'poolroom' && local.z + 12 < getShorelineZ(local.x + 1.2);
-    const speed = wading ? 1.7 : k.has('ShiftLeft') || k.has('ShiftRight') ? 5.2 : 3.2;
+    const speed = (wading ? 1.7 : k.has('ShiftLeft') || k.has('ShiftRight') ? 5.2 : 3.2) * 1.3;
     direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), camera.rotation.y).multiplyScalar(speed);
     velocity.current.lerp(direction, 1 - Math.exp(-12 * dt));
     const position = camera.position.clone().addScaledVector(velocity.current, dt);
@@ -219,15 +219,16 @@ const WavyCorridor = () => {
 };
 
 const OutsideScenery = () => {
+  // Reuse the garden panorama from the texture cache; no second download or cloud overdraw.
+  const clouds = useTexture('/sky-garden-clouds.png');
+  clouds.colorSpace = THREE.SRGBColorSpace;
   return (
-    <group position={[-60, -15, -40]}>
-      <Sky sunPosition={[-100, 2, 20]} turbidity={0.1} rayleigh={0.1} mieCoefficient={0.001} mieDirectionalG={0.9} />
-      <directionalLight position={[-80, 20, 10]} intensity={3.2} color="#ffe3ba" />
-      <Clouds texture="/cloud-soft.svg" material={THREE.MeshLambertMaterial} limit={400}>
-        <Cloud seed={1} segments={45} bounds={[80, 15, 160]} volume={80} color="#4a88b5" position={[0, -5, 0]} opacity={0.9} />
-        <Cloud seed={2} segments={35} bounds={[70, 10, 150]} volume={60} color="#8bb8d6" position={[-10, 2, 10]} opacity={0.8} />
-        <Cloud seed={3} segments={35} bounds={[60, 8, 140]} volume={50} color="#ffffff" position={[-5, 8, -10]} opacity={0.9} />
-      </Clouds>
+    <group>
+      <mesh position={[0, 0, -70]} renderOrder={-1}>
+        <sphereGeometry args={[300, 48, 24]} />
+        <meshBasicMaterial map={clouds} side={THREE.BackSide} depthWrite={false} fog={false} />
+      </mesh>
+      <directionalLight position={[-80, 25, -30]} intensity={3.2} color="#ffe3ba" />
     </group>
   );
 };
